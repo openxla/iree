@@ -1372,7 +1372,6 @@ def VM_BufferStoreF64Op :
 //===----------------------------------------------------------------------===//
 
 // TODO(benvanik): vm.list.push.i32 / vm.list.pop.i32 (variadic)
-// TODO(benvanik): vm.list.copy(src_list, src_index, dst_list, dst_index, length)
 // TODO(benvanik): vm.list.slice(list, index, length) -> list
 // TODO(benvanik): export into a rwdata buffer
 
@@ -1476,6 +1475,68 @@ def VM_ListResizeOp :
     VM_EncOpcode<VM_OPC_ListResize>,
     VM_EncOperand<"list", 0>,
     VM_EncOperand<"new_size", 1>,
+  ];
+}
+
+def VM_ListCopyOp :
+    VM_Op<"list.copy", [
+      DeclareOpInterfaceMethods<VM_SerializableOpInterface>,
+      AllTypesMatch<["src_list", "dst_list"]>,
+      MemoryEffects<[MemWrite]>,
+    ]> {
+  let summary = [{copies src_list to dst_list with given offset and count}];
+  let description = [{
+    Copies `count` elements of src_list starting from src_offset to dst_list
+    beginning with dst_offset.
+  }];
+
+  let arguments = (ins
+    VM_AnyList:$src_list,
+    VM_Index:$src_offset,
+    VM_AnyList:$dst_list,
+    VM_Index:$dst_offset,
+    VM_Index:$count
+  );
+
+  let assemblyFormat = [{
+    operands attr-dict `:` `(` type($src_list) `,` type($src_offset)
+                           `,` type($dst_list) `,` type($dst_offset)
+                           `,` type($count) `)`
+  }];
+
+  let encoding = [
+    VM_EncOpcode<VM_OPC_ListCopy>,
+    VM_EncOperand<"src_list", 0>,
+    VM_EncOperand<"src_offset", 1>,
+    VM_EncOperand<"dst_list", 2>,
+    VM_EncOperand<"dst_offset", 3>,
+    VM_EncOperand<"count", 4>
+  ];
+}
+
+def VM_ListSwapOp :
+    VM_Op<"list.swap", [
+      DeclareOpInterfaceMethods<VM_SerializableOpInterface>,
+      AllTypesMatch<["list_a", "list_b"]>,
+      MemoryEffects<[MemWrite]>,
+    ]> {
+  let summary = [{swap the contents of two lists}];
+  let description = [{
+    Swaps the contents of list_a with list_b. Fails if list_a and list_b have
+    different allocators or either have been allocated on the stack
+  }];
+
+  let arguments = (ins
+    VM_AnyList:$list_a,
+    VM_AnyList:$list_b
+  );
+
+  let assemblyFormat = "operands attr-dict `:` type($list_a)";
+
+  let encoding = [
+    VM_EncOpcode<VM_OPC_ListSwap>,
+    VM_EncOperand<"list_a", 0>,
+    VM_EncOperand<"list_b", 1>,
   ];
 }
 

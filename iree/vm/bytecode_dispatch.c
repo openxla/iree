@@ -1132,6 +1132,46 @@ iree_status_t iree_vm_bytecode_dispatch(
       IREE_RETURN_IF_ERROR(iree_vm_list_resize(list, new_size));
     });
 
+    DISPATCH_OP(CORE, ListCopy, {
+      bool list_is_move;
+      iree_vm_ref_t* src_list_ref =
+          VM_DecOperandRegRef("src_list", &list_is_move);
+      iree_vm_list_t* src_list = iree_vm_list_deref(*src_list_ref);
+      if (IREE_UNLIKELY(!src_list)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "src_list is null");
+      }
+      uint32_t src_offset = VM_DecOperandRegI32("src_offset");
+      iree_vm_ref_t* dst_list_ref =
+          VM_DecOperandRegRef("dst_list", &list_is_move);
+      iree_vm_list_t* dst_list = iree_vm_list_deref(*dst_list_ref);
+      if (IREE_UNLIKELY(!dst_list)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "dst_list is null");
+      }
+      uint32_t dst_offset = VM_DecOperandRegI32("dst_offset");
+      uint32_t count = VM_DecOperandRegI32("count");
+
+      IREE_RETURN_IF_ERROR(
+          iree_vm_list_copy(src_list, src_offset, dst_list, dst_offset, count));
+    });
+
+    DISPATCH_OP(CORE, ListSwap, {
+      bool list_is_move;
+      iree_vm_ref_t* list_a_ref = VM_DecOperandRegRef("list_a", &list_is_move);
+      iree_vm_list_t* list_a = iree_vm_list_deref(*list_a_ref);
+      if (IREE_UNLIKELY(!list_a)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list_a is null");
+      }
+      iree_vm_ref_t* list_b_ref = VM_DecOperandRegRef("list_b", &list_is_move);
+      iree_vm_list_t* list_b = iree_vm_list_deref(*list_b_ref);
+      if (IREE_UNLIKELY(!list_b)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list_b is null");
+      }
+
+      IREE_RETURN_IF_ERROR(iree_vm_list_swap(list_a, list_b));
+    });
+
     DISPATCH_OP(CORE, ListGetI32, {
       bool list_is_move;
       iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);

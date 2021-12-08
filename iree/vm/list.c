@@ -686,3 +686,128 @@ iree_status_t iree_vm_list_register_types(void) {
   iree_vm_list_descriptor.type_name = iree_make_cstring_view("vm.list");
   return iree_vm_ref_register_type(&iree_vm_list_descriptor);
 }
+
+#define iree_swap(type, a, b) \
+  do {                        \
+    type t = a;               \
+    a = b;                    \
+    b = t;                    \
+  } while (0);
+
+static bool iree_vm_list_is_the_same_type(const iree_vm_list_t* list_a,
+                                          const iree_vm_list_t* list_b) {
+  return list_a->element_type.value_type == list_b->element_type.value_type &&
+         list_a->element_type.ref_type == list_b->element_type.ref_type;
+}
+
+static bool iree_vm_list_is_compatible_allocator(const iree_vm_list_t* list_a,
+                                                 const iree_vm_list_t* list_b) {
+  // Reject if either list is allocated on the stack.
+  if (iree_allocator_is_null(list_a->allocator) ||
+      iree_allocator_is_null(list_b->allocator)) {
+    return false;
+  }
+
+  return iree_allocator_is_equal(list_a->allocator, list_b->allocator);
+}
+
+iree_status_t iree_vm_list_swap(iree_vm_list_t* list_a,
+                                iree_vm_list_t* list_b) {
+  if (!iree_vm_list_is_the_same_type(list_a, list_b)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "list types must match.");
+  }
+
+  if (!iree_vm_list_is_compatible_allocator(list_a, list_b)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "lists must have the same allocator");
+  }
+
+  iree_swap(iree_host_size_t, list_a->capacity, list_b->capacity);
+  iree_swap(iree_host_size_t, list_a->count, list_b->count);
+  iree_swap(iree_host_size_t, list_a->element_size, list_b->element_size);
+  iree_swap(iree_vm_list_storage_mode_t, list_a->storage_mode,
+            list_b->storage_mode);
+  iree_swap(void*, list_a->storage, list_b->storage);
+
+  return iree_ok_status();
+}
+
+iree_status_t iree_vm_list_copy(const iree_vm_list_t* src_list,
+                                iree_host_size_t src_offset,
+                                iree_vm_list_t* dst_list,
+                                iree_host_size_t dst_offset,
+                                iree_host_size_t count) {
+  if (!iree_vm_list_is_the_same_type(src_list, dst_list)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "list types must match");
+  }
+
+  if (src_offset + count > src_list->count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "source list range out of bounds (src_offset=%zu, count=%zu, size=%zu)",
+        src_offset, count, src_list->count);
+  }
+
+  if (dst_offset + count > dst_list->count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "destination list range out of bounds "
+                            "(dst_offset=%zu, count=%zu, size=%zu)",
+                            dst_offset, count, dst_list->count);
+  }
+
+  if (src_list == dst_list &&
+      ((src_offset <= dst_offset && src_offset + count > dst_offset) ||
+       (dst_offset <= src_offset && dst_offset + count > src_offset))) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "list copies overlapped (src_offset=%zu, dst_offset=%zu, count=%zu)",
+        src_offset, dst_offset, count);
+  }
+
+  uint8_t* src_ptr =
+      (uint8_t*)src_list->storage + src_offset * src_list->element_size;
+  uint8_t* dst_ptr =
+      (uint8_t*)dst_list->storage + dst_offset * dst_list->element_size;
+
+  switch (src_list->storage_mode) {
+    case IREE_VM_LIST_STORAGE_MODE_VALUE: {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        memcpy(dst_ptr, src_ptr, count * dst_list->element_size);
+      }
+      break;
+    }
+    case IREE_VM_LIST_STORAGE_MODE_REF: {
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        iree_vm_ref_t value;
+        IREE_RETURN_IF_ERROR(
+            iree_vm_list_get_ref_assign(src_list, i + src_offset, &value));
+        IREE_RETURN_IF_ERROR(
+            iree_vm_list_set_ref_retain(dst_list, i + dst_offset, &value));
+      }
+      break;
+    }
+    case IREE_VM_LIST_STORAGE_MODE_VARIANT: {
+      iree_vm_variant_t* src_variants = (iree_vm_variant_t*)src_ptr;
+      iree_vm_variant_t* dst_variants = (iree_vm_variant_t*)dst_ptr;
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        iree_vm_variant_t* src_variant = &src_variants[i];
+        iree_vm_variant_t* dst_variant = &dst_variants[i];
+        if (iree_vm_type_def_is_ref(&dst_variant->type)) {
+          iree_vm_ref_release(&dst_variant->ref);
+        }
+        if (iree_vm_type_def_is_ref(&src_variant->type)) {
+          iree_vm_ref_retain(&src_variant->ref, &dst_variant->ref);
+        } else {
+          memcpy(dst_variant->value_storage, src_variant->value_storage,
+                 sizeof(dst_variant->value_storage));
+        }
+        dst_variant->type = src_variant->type;
+      }
+      break;
+    }
+  }
+
+  return iree_ok_status();
+}
