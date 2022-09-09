@@ -13,6 +13,7 @@
 #include "iree/compiler/Codegen/Utils/Utils.h"
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
+#include "mlir/Conversion/TosaToArith/TosaToArith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/PDL/IR/PDL.h"
@@ -244,6 +245,19 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
       }
     }
   }
+
+  // Use the default 64-bit lowering for TOSA's ApplyScale operator:
+  // This lowering widens integer types to 64-bit an performs the non-fused
+  // operations, specifically multiply, add, and shift. Bit-widening
+  // is used to guarantee higher-order bits are not truncated during the
+  // multiply or add. Use the 32-bit lowering for RISC-V if 'zve32x' is
+  // specified and there is no 64-bit integer vector support.
+  bool useApplyScale32BitImpl =
+      isRISCV(variantOp) && hasZve32xFeature(variantOp) &&
+      !hasVFeature(variantOp) && !hasZve64xFeature(variantOp);
+  OpPassManager &nestedModulePM = executableLoweringPipeline.nest<ModuleOp>();
+  nestedModulePM.addNestedPass<func::FuncOp>(tosa::createTosaToArith(
+      /*includeApplyScale=*/true, useApplyScale32BitImpl));
 
   if (failed(runPipeline(executableLoweringPipeline, variantOp))) {
     return signalPassFailure();

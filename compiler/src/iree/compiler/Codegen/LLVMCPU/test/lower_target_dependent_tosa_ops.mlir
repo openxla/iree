@@ -1,4 +1,6 @@
-// RUN: iree-opt --split-input-file --pass-pipeline='hal.executable(hal.executable.variant(builtin.module(iree-convert-to-llvm)))' %s | FileCheck %s
+// RUN: iree-opt --split-input-file --pass-pipeline='hal.executable(hal.executable.variant(iree-llvmcpu-lower-executable-target{test-lowering-configuration=true}))' --split-input-file %s | FileCheck %s
+
+// Test LLVMCPULowerTargetDependentTosa pass.
 
 #pipeline_layout = #hal.pipeline.layout<push_constants = 0, sets = [
   #hal.descriptor_set.layout<0, bindings = [
@@ -41,10 +43,10 @@ hal.executable private @apply_scale_no_vector_feature {
 // 64-bit lowering is used by default if no vector features are provided.
 // TODO(diegocaballero): We shouldn't vectorize the code if no vector features
 // are provided.
-// CHECK-LABEL: llvm.func internal @apply_scale_no_vector_feature
-//       CHECK:   %[[ADD:.*]] = llvm.add %{{.*}}, %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   %[[SHR:.*]] = llvm.ashr %[[ADD]], %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   llvm.trunc %[[SHR]] : vector<2xi64> to vector<2xi32>
+// CHECK-LABEL: @apply_scale_no_vector_feature
+//       CHECK:   %[[ADD:.*]] = arith.addi %{{.*}}, %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   %[[SHR:.*]] = arith.shrsi %[[ADD]], %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   arith.trunci %[[SHR]] : vector<2xi64> to vector<2xi32>
 
 // -----
 
@@ -87,10 +89,10 @@ hal.executable private @apply_scale_v {
 }
 
 // 64-bit lowering is used with '+v'.
-// CHECK-LABEL: llvm.func internal @apply_scale_v
-//       CHECK:   %[[ADD:.*]] = llvm.add %{{.*}}, %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   %[[SHR:.*]] = llvm.ashr %[[ADD]], %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   llvm.trunc %[[SHR]] : vector<2xi64> to vector<2xi32>
+// CHECK-LABEL: @apply_scale_v
+//       CHECK:   %[[ADD:.*]] = arith.addi %{{.*}}, %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   %[[SHR:.*]] = arith.shrsi %[[ADD]], %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   arith.trunci %[[SHR]] : vector<2xi64> to vector<2xi32>
 
 // -----
 
@@ -133,10 +135,10 @@ hal.executable private @apply_scale_zve64x {
 }
 
 // 64-bit lowering is used with '+zve64x'.
-// CHECK-LABEL: llvm.func internal @apply_scale_zve64x
-//       CHECK:   %[[ADD:.*]] = llvm.add %{{.*}}, %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   %[[SHR:.*]] = llvm.ashr %[[ADD]], %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   llvm.trunc %[[SHR]] : vector<2xi64> to vector<2xi32>
+// CHECK-LABEL: @apply_scale_zve64x
+//       CHECK:   %[[ADD:.*]] = arith.addi %{{.*}}, %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   %[[SHR:.*]] = arith.shrsi %[[ADD]], %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   arith.trunci %[[SHR]] : vector<2xi64> to vector<2xi32>
 
 // -----
 
@@ -181,7 +183,8 @@ hal.executable private @apply_scale_zve32x {
 // 32-bit lowering is used with '+zve32x'. Note that the 32-bit lowering
 // generates 64-bit mul operations that are decomposed into 32-bit operations by
 // the LLVM backend.
-// CHECK-LABEL: llvm.func internal @apply_scale_zve32x
-//       CHECK:   %[[MUL:.*]] = llvm.mul %{{.*}}, %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   %[[SHR:.*]] = llvm.lshr %{{.*}}, %{{.*}} : vector<2xi64>
-//  CHECK-NEXT:   llvm.trunc %[[SHR]] : vector<2xi64> to vector<2xi32>
+// CHECK-LABEL: @apply_scale_zve32x
+//       CHECK:   %[[MUL:.*]] = arith.muli %{{.*}}, %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   %[[SHR:.*]] = arith.shrui %{{.*}}, %{{.*}} : vector<2xi64>
+//  CHECK-NEXT:   arith.trunci %[[SHR]] : vector<2xi64> to vector<2xi32>
+

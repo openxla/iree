@@ -16,7 +16,6 @@ iree_lit_test_suite(
   SRCS
     "aarch64_dotprod_vector_lowering.mlir"
     "aarch64_vector_lowering.mlir"
-    "apply_scale_lowering.mlir"
     "check_ir_before_llvm_conversion.mlir"
     "convert_to_llvm.mlir"
     "emit_vectorization_remarks.mlir"
@@ -24,6 +23,7 @@ iree_lit_test_suite(
     "hal_interface_constants.mlir"
     "hal_interface_workgroup_info.mlir"
     "illegal_configuration.mlir"
+    "lower_target_dependent_tosa_ops.mlir"
     "materialize_aarch64_launch_configuration.mlir"
     "materialize_riscv_launch_configuration.mlir"
     "materialize_vmvx_launch_configuration.mlir"
