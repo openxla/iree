@@ -36,6 +36,10 @@ StringRef getWorkgroupMemoryNumItemsGENumItersMarker() {
   return "workgroup_memory_numprocs_ge_numiters";
 }
 
+StringRef getWorkgroupSpecializationMarker() {
+  return "workgroup_specialization";
+}
+
 StringRef getCopyToWorkgroupMemoryMarker() {
   return "copy_to_workgroup_memory";
 }
@@ -65,6 +69,14 @@ bool hasMarker(Operation *op, ArrayRef<StringRef> marker) {
 void setMarker(Operation *op, StringRef marker) {
   op->setAttr(IREE::LinalgExt::LinalgTransforms::kLinalgTransformMarker,
               StringAttr::get(op->getContext(), marker));
+}
+
+Operation *findAncestorWithMarker(Operation *op, StringRef marker) {
+  while (op) {
+    if (hasMarker(op, marker)) return op;
+    op = op->getParentOp();
+  };
+  return nullptr;
 }
 
 }  // namespace iree_compiler

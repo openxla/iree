@@ -33,6 +33,10 @@ StringRef getWorkgroupMemoryMarker();
 /// to workgroups L1 tiles.
 StringRef getWorkgroupL1TileMarker();
 
+/// Marker to scf.IfOp to denote that the op is inserted for workgroup
+/// specialization.
+StringRef getWorkgroupSpecializationMarker();
+
 /// Marker for copy operations that are moving data from StorageClass to
 /// Workgroup memory.
 StringRef getCopyToWorkgroupMemoryMarker();
@@ -58,6 +62,9 @@ bool hasMarker(Operation *, ArrayRef<StringRef> markers = {});
 
 /// Sets a given marker on an operation.
 void setMarker(Operation *, StringRef);
+
+/// Find an ancester with the given marker.
+Operation *findAncestorWithMarker(Operation *op, StringRef marker);
 
 }  // namespace iree_compiler
 }  // namespace mlir
