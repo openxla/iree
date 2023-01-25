@@ -9,8 +9,6 @@
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -20,6 +18,15 @@ using namespace mlir;
 
 #define DEBUG_TYPE "transform-matchers"
 #define DBGS() llvm::dbgs() << "[" DEBUG_TYPE "] "
+
+void transform_ext::CapturingOpMatcher::getAllNested(
+    SmallVectorImpl<CapturingOpMatcher *> &nested) {
+  int64_t start = nested.size();
+  llvm::append_range(nested, nestedCapturingMatchers);
+  for (int64_t position = start; position < nested.size(); ++position) {
+    llvm::append_range(nested, nested[position]->nestedCapturingMatchers);
+  }
+}
 
 //===---------------------------------------------------------------------===//
 // StructuredOpMatcher and friends.
@@ -549,7 +556,7 @@ void transform_ext::makeReductionMatcher(
     transform_ext::StructuredOpMatcher &fill,
     transform_ext::StructuredOpMatcher &leading,
     transform_ext::StructuredOpMatcher &trailing,
-    MatchedReductionCaptures &captures) {
+    MatchedReductionCaptures &captures, bool leadingOptional) {
   // The core part of the matcher is anchored on a particular reduction op.
   reduction =
       m_StructuredOp()
@@ -630,7 +637,7 @@ void transform_ext::makeReductionMatcher(
           // Capture output elemental type.
           .output(0, CaptureElementTypeBitWidth(
                          captures.maybeLeadingOutputElementalTypeBitWidth));
-  reduction = reduction.input(0, leading, OptionalMatch());
+  reduction = reduction.input(0, leading, OptionalMatch(leadingOptional));
 
   // Optional trailing can be any map, transpose, broadcast but not reduce or
   // windowing operation for now.
@@ -646,6 +653,5 @@ void transform_ext::makeReductionMatcher(
           // Capture output elemental type.
           .output(0, CaptureElementTypeBitWidth(
                          captures.maybeTrailingOutputElementalTypeBitWidth));
-  reduction = reduction.result(0, HasAnyUse(), trailing, OptionalMatch())
-                  .allTilableOpsCaptured<func::FuncOp>();
+  reduction = reduction.result(0, HasAnyUse(), trailing, OptionalMatch());
 }
