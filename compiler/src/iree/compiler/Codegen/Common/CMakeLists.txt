@@ -172,6 +172,7 @@ iree_cc_library(
   SRCS
     "DecomposeLinalgGeneric.cpp"
     "FoldAffineMinInDistributedLoops.cpp"
+    "GPUCoalascedAccess.cpp"
     "GPUDistributeSharedMemoryCopy.cpp"
     "GPUMultiBuffering.cpp"
     "GPUPatterns.cpp"
