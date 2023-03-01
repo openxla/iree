@@ -517,7 +517,24 @@ static SmallVector<int64_t> getDefaultDistributedLevelTileSizes(
         getMaxTileSize(lbs[i], ubs[i], distributedTileSizes[i], minTileSizes[i],
                        allowIncompleteTile);
   }
-  return distributedTileSizes;
+  // All higher dimensions should be tiled at the workgroup level
+  // (distributedTileSizes), except after encountering an already specified
+  // workgroup tile - because at that point, parallel and reduction tiling would
+  // handle the required tiling. If the dimensions is less than 4, again
+  // parallel and reduction tiling would handle it.
+  SmallVector<int64_t> updatedDistributedTileSizes;
+  updatedDistributedTileSizes.reserve(distributedTileSizes.size());
+  bool foundNonZero = false;
+  for (auto val : distributedTileSizes) {
+    if (val == 0) {
+      updatedDistributedTileSizes.push_back(
+          (foundNonZero || distributedTileSizes.size() <= 4) ? 0 : 1);
+      continue;
+    }
+    updatedDistributedTileSizes.push_back(val);
+    foundNonZero = true;
+  }
+  return updatedDistributedTileSizes;
 }
 
 static SmallVector<int64_t> getDefaultDistributedLevelTileSizes(
