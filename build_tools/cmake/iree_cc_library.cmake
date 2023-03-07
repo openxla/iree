@@ -6,6 +6,45 @@
 
 include(CMakeParseArguments)
 
+# iree_cc_filter_deps()
+#
+# Performs dependency filtering of arbitrary libraries prior to adding them
+# via target_link_libraries().
+#
+# IREE itself aims to not require such workarounds, but LLVM is not terribly
+# behaved in all of its different linking modes. Specifically when using
+# LLVM_LINK_LLVM_DYLIB, we must approximate what llvm_add_library does
+# and substitute and LLVM* deps for the "LLVM" library (libLLVM.so).
+# If this isn't done consistently, we end up with the dreaded global
+# variable duplication that results in (among other things) inconsistent
+# CLI registrations.
+#
+# The |deps_var| is the name of a list of deps in the parent scope.
+function(iree_cc_filter_deps deps_var)
+  # If linking against libLLVM, detect if we are linking to any LLVM libs
+  # that are part of libLLVM.so and substitute.
+  if(LLVM_LINK_LLVM_DYLIB)
+    get_property(_llvm_dylib_targets GLOBAL PROPERTY LLVM_DYLIB_INCLUDED_LIBNAMES)
+    if(NOT _llvm_dylib_targets)
+      # Old installs of LLVM do not include this global property. Fake it
+      # by just including LLVMSupport, which is the bare minimum anyway and
+      # avoids certain bad things about duplicate CLI registrations.
+      set(_llvm_dylib_targets LLVMSupport)
+    endif()
+    set(_all_deps "${${deps_var}}")
+    set(_new_deps)
+    foreach(_dep ${_all_deps})
+      if(_dep IN_LIST _llvm_dylib_targets)
+        # Substitute the LLVM library.
+        list(APPEND _new_deps "LLVM")
+      else()
+        list(APPEND _new_deps "${_dep}")
+      endif()
+    endforeach()
+    set(${deps_var} "${_new_deps}" PARENT_SCOPE)
+  endif()
+endfunction()
+
 # iree_cc_library()
 #
 # CMake function to imitate Bazel's cc_library rule.
@@ -110,6 +149,7 @@ function(iree_cc_library)
   if(IREE_IMPLICIT_DEFS_CC_DEPS)
     list(APPEND _RULE_DEPS ${IREE_IMPLICIT_DEFS_CC_DEPS})
   endif()
+  iree_cc_filter_deps(_RULE_DEPS)
 
   if(NOT _RULE_IS_INTERFACE)
     add_library(${_OBJECTS_NAME} OBJECT)

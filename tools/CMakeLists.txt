@@ -202,11 +202,14 @@ if(IREE_BUILD_COMPILER)
   # If a target backend that requires LLD to link codegen executables is
   # enabled, install the target.
   if(IREE_LLD_TARGET)
-    install(
-      TARGETS lld
-      COMPONENT Compiler
-      RUNTIME DESTINATION bin
-    )
+    get_target_property(_is_lld_imported ${IREE_LLD_TARGET} IMPORTED)
+    if(NOT _is_lld_imported)
+      install(
+        TARGETS lld
+        COMPONENT Compiler
+        RUNTIME DESTINATION bin
+      )
+    endif()
   endif()
 
   iree_cc_binary(
@@ -214,15 +217,16 @@ if(IREE_BUILD_COMPILER)
       iree-tblgen
     SRCS
       "${IREE_ROOT_DIR}/third_party/llvm-project/mlir/tools/mlir-tblgen/mlir-tblgen.cpp"
+      "${IREE_ROOT_DIR}/third_party/llvm-project/mlir/lib/Support/IndentedOstream.cpp"
       "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/Dialect/VM/Tools/VMOpEncoderGen.cpp"
       "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/Dialect/VM/Tools/VMOpTableGen.cpp"
     DEPS
-      LLVMSupport
-      LLVMTableGen
-      MLIRSupport
+      # Important: Tablegen is special and is only ever linked static and
+      # must not include other MLIR/LLVM libraries. See notes on the
+      # MLIRTblgenLib target. Violating this will cause global symbol conflicts
+      # in libLLVM builds.
       MLIRTableGen
       MLIRTblgenLib
-      iree::compiler::Utils
     HOSTONLY
   )
 
