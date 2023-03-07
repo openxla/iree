@@ -71,24 +71,30 @@ cc_binary(
     ],
 )
 
-cc_binary(
+#cc_binary(
+#    name = "iree-import-tf",
+#    srcs = ["iree-import-tf-main.cpp"],
+#    deps = [
+#        "//iree_tf_compiler/MHLO",
+#        "//iree_tf_compiler/TF",
+#        "@llvm-project//llvm:Support",
+#        "@llvm-project//mlir:BytecodeWriter",
+#        "@llvm-project//mlir:IR",
+#        "@llvm-project//mlir:Pass",
+#        "@llvm-project//mlir:Support",
+#        "@org_tensorflow//tensorflow/cc/saved_model:loader",
+#        "@org_tensorflow//tensorflow/compiler/mlir:init_mlir",
+#        "@org_tensorflow//tensorflow/compiler/mlir/tensorflow",
+#        "@org_tensorflow//tensorflow/compiler/mlir/tensorflow:import_model",
+#        "@org_tensorflow//tensorflow/compiler/mlir/tensorflow:tf_dialect_passes",
+#        "@org_tensorflow//tensorflow/core/platform:errors",
+#    ],
+#)
+
+py_binary(
     name = "iree-import-tf",
-    srcs = ["iree-import-tf-main.cpp"],
-    deps = [
-        "//iree_tf_compiler/MHLO",
-        "//iree_tf_compiler/TF",
-        "@llvm-project//llvm:Support",
-        "@llvm-project//mlir:BytecodeWriter",
-        "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Pass",
-        "@llvm-project//mlir:Support",
-        "@org_tensorflow//tensorflow/cc/saved_model:loader",
-        "@org_tensorflow//tensorflow/compiler/mlir:init_mlir",
-        "@org_tensorflow//tensorflow/compiler/mlir/tensorflow",
-        "@org_tensorflow//tensorflow/compiler/mlir/tensorflow:import_model",
-        "@org_tensorflow//tensorflow/compiler/mlir/tensorflow:tf_dialect_passes",
-        "@org_tensorflow//tensorflow/core/platform:errors",
-    ],
+    srcs = ["iree-import-tf-main.py"],
+    main = "iree-import-tf-main.py",
 )
 
 cc_binary(
