@@ -43,6 +43,7 @@ iree_compiler_cc_library(
         "DetachElementwiseFromNamedOps.cpp",
         "DispatchWithTransformDialect.cpp",
         "DumpDispatchGraph.cpp",
+        "DynamicizeStaticShapes.cpp",
         "EraseUnusedLinalgOperands.cpp",
         "ExpandTensorShapes.cpp",
         "ExportBenchmarkFuncs.cpp",

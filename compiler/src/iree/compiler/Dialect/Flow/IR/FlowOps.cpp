@@ -482,6 +482,74 @@ void DispatchRegionOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 //===----------------------------------------------------------------------===//
+// flow.dispatch.dynamicize_shape
+//===----------------------------------------------------------------------===//
+
+LogicalResult DispatchDynamicizeShapeOp::verify() {
+  auto srcShape = getSource().getType().cast<ShapedType>().getShape();
+  auto dstShape = getType().cast<ShapedType>().getShape();
+  if (srcShape.size() != dstShape.size()) {
+    return emitOpError("output rank does not match input rank");
+  }
+  if (dstShape.size() != getDynamicDims().size()) {
+    return emitOpError("dynamic shape value count does not match output rank");
+  }
+
+  if (llvm::any_of(dstShape,
+                   [](int64_t dim) { return !ShapedType::isDynamic(dim); })) {
+    return emitOpError("output shape should be fully dynamic");
+  }
+
+  for (auto [srcDim, dstDim, dynDim] :
+       llvm::zip_equal(srcShape, dstShape, getDynamicDims())) {
+    if (ShapedType::isDynamic(srcDim)) continue;
+
+    // Verify static dimensions have corresponding SSA value captured.
+    APInt dimValue;
+    auto dimOp = dynDim.getDefiningOp<DispatchDynamicizeDimOp>();
+    if (!dimOp) {
+      return emitOpError(
+          "output dimension SSA value should come from "
+          "flow.dispatch.dynamicize_dim");
+    }
+    if (dimOp.getValue().getSExtValue() != srcDim) {
+      return emitOpError("input dimension size ")
+             << srcDim
+             << " expected the corresponding output dimension to capture the "
+                "same constant SSA value";
+    }
+  }
+
+  return success();
+}
+
+DispatchDynamicizeShapeOp DispatchDynamicizeShapeOp::build(OpBuilder &builder,
+                                                           Location loc,
+                                                           Value sourceValue) {
+  auto sourceType = sourceValue.getType().cast<RankedTensorType>();
+
+  SmallVector<Value, 4> dimValues;
+  dimValues.reserve(sourceType.getRank());
+
+  for (auto [dimIndex, dimSize] : llvm::enumerate(sourceType.getShape())) {
+    if (ShapedType::isDynamic(dimSize)) {
+      dimValues.push_back(
+          builder.create<tensor::DimOp>(loc, sourceValue, dimIndex));
+    } else {
+      dimValues.push_back(
+          builder.create<DispatchDynamicizeDimOp>(loc, dimSize));
+    }
+  }
+
+  SmallVector<int64_t, 4> shape(sourceType.getRank(), ShapedType::kDynamic);
+  auto dstType = RankedTensorType::get(shape, sourceType.getElementType(),
+                                       sourceType.getEncoding());
+
+  return builder.create<DispatchDynamicizeShapeOp>(loc, dstType, sourceValue,
+                                                   dimValues);
+}
+
+//===----------------------------------------------------------------------===//
 // flow.dispatch.tie_shape
 //===----------------------------------------------------------------------===//
 
