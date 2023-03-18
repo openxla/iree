@@ -33,7 +33,7 @@ hal.executable private @matvec_static  {
   }
 }
 
-//   CHECK-DAG: #[[CONFIG:.+]] = #iree_codegen.lowering_config<tile_sizes = {{\[}}[64, 0], [32, 0], [0, 16]]>
+//   CHECK-DAG: #[[CONFIG:.+]] = #iree_codegen.lowering_config<tile_sizes = {{\[}}[64, 0], [8, 0], [0, 16]]>
 //   CHECK-DAG: #[[TRANSLATION:.+]] = #iree_codegen.translation_info<CPUDoubleTilingExpert>
 //       CHECK: hal.executable.export public @matvec_static
 //  CHECK-SAME:     translation_info = #[[TRANSLATION]]
