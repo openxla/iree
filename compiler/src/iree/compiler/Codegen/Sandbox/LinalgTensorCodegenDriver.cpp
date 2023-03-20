@@ -15,18 +15,19 @@
 #include "iree/compiler/Codegen/Utils/Utils.h"
 #include "llvm/Support/Debug.h"
 #include "mlir/AsmParser/AsmParser.h"
+#include "mlir/Dialect/Affine/IR/AffineValueMap.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/X86Vector/Transforms.h"
+#include "mlir/Interfaces/ValueBoundsOpInterface.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
 using namespace mlir;
-// using namespace mlir::linalg;
 
 using mlir::iree_compiler::IREE::LinalgExt::CodegenStrategy;
 using mlir::iree_compiler::IREE::LinalgExt::LinalgPeelOptions;
@@ -36,6 +37,8 @@ using mlir::iree_compiler::IREE::LinalgExt::LinalgVectorizationOptions;
 using mlir::iree_compiler::IREE::LinalgExt::LinalgVectorLoweringOptions;
 
 #define DEBUG_TYPE "iree-linalg-tensor-codegen-driver"
+#define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
+#define LDBG(X) LLVM_DEBUG(DBGS() << X)
 
 //===----------------------------------------------------------------------===//
 // IREE specific functions
@@ -162,10 +165,82 @@ static SmallVector<int64_t> getCanonicalVectorShape(func::FuncOp funcOp) {
   return canonicalVectorShape;
 }
 
+/// Tries to infer the vector sizes from an IR that has been tiled for
+/// vectorization. Returns failure if vector sizes can't be inferred. For know
+/// this utility is only able to extract tile size information from
+/// `tensor.extract_slice` and `affine.min` ops, which should cover most but not
+/// all the cases.
+/// TODO(dcaballe)" Enhance/replace this logic with `FlatAffineConstraints`
+/// utilities.
+static FailureOr<SmallVector<int64_t>> inferVectorSizesFromIR(
+    linalg::LinalgOp linalgOp) {
+  LDBG("Getting vector sizes for:\n" << linalgOp << "\n");
+
+  auto idxMaps = linalgOp.getIndexingMapsArray();
+  assert(!idxMaps.empty());
+  unsigned numDims = idxMaps[0].getNumDims();
+
+  SmallVector<int64_t> vectorSizes;
+  for (int dim = 0; dim < numDims; ++dim) {
+    // Map dimension `dim` to an operand dimension that we will use to
+    // traverse the U-D chain to get `dim` vector size information.
+    SmallVector<std::pair<Value, unsigned>> operandDimPairs;
+    linalgOp.mapIterationSpaceDimToAllOperandDims(dim, operandDimPairs);
+    if (operandDimPairs.empty()) {
+      return failure();
+    }
+
+    Value firstOperand = operandDimPairs[0].first;
+    unsigned firstOperandDim = operandDimPairs[0].second;
+
+    // Trivial case: `dim` size is available in the operand type.
+    int64_t dimSize =
+        firstOperand.getType().cast<ShapedType>().getShape()[firstOperandDim];
+    if (!ShapedType::isDynamic(dimSize)) {
+      vectorSizes.push_back(dimSize);
+      continue;
+    }
+
+    // TODO
+    FailureOr<int64_t> dimBound;
+    for (auto operandDimPair : operandDimPairs) {
+      Value operand = operandDimPair.first;
+      unsigned operandDim = operandDimPair.second;
+      dimBound = ValueBoundsConstraintSet::computeConstantBound(
+          presburger::BoundType::UB, operand, operandDim);
+
+      if (succeeded(dimBound)) {
+        break;
+        // llvm_unreachable("reifyBounds failed");
+      }
+    }
+
+    if (failed(dimBound)) {
+      return failure();
+    }
+
+    // TODO(dcaballe): UBs are exclusive by default. Use new attribute in
+    // interface.
+    dimSize = dimBound.value() - 1;
+    vectorSizes.push_back(dimSize);
+    LDBG("Inferred vector size '" << dimSize << "' for dimension '" << dim
+                                  << "'\n");
+  }
+
+  return vectorSizes;
+}
+
 // Give the canonical vector shape of a dispatch, returns the vector sizes for a
 // particular linalg op within that dispatch.
 static SmallVector<int64_t> getVectorSizes(
     linalg::LinalgOp linalgOp, ArrayRef<int64_t> canonicalVectorShape) {
+  // Try to infer the vector sizes from the IR. If it fails, try to get them
+  // from the lowering config.
+  auto inferredVectorSizes = inferVectorSizesFromIR(linalgOp);
+  if (succeeded(inferredVectorSizes)) {
+    return *inferredVectorSizes;
+  }
+
   FailureOr<Operation *> rootOp = getRootOp(linalgOp);
   if (failed(rootOp)) {
     return {};
