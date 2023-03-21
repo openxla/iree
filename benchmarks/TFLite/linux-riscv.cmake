@@ -47,6 +47,8 @@ iree_benchmark_suite(
     "${MOBILEBERT_INT8_MODULE}"
     "${PERSON_DETECT_INT8_MODULE}"
     "${EFFICIENTNET_INT8_MODULE}"
+    "${SSD_MOBILENET_V2_DYNAMIC_F32_MODULE}"
+    "${SSD_MOBILENET_V2_DYNAMIC_INT8_MODULE}"
 
   BENCHMARK_MODES
     "full-inference,default-flags"
