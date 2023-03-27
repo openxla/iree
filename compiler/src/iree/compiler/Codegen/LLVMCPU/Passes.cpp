@@ -61,7 +61,7 @@ static llvm::cl::opt<bool> clEnableMicrokernelsDecomposeLinalgGeneric(
 static llvm::cl::opt<bool> clEnableReassociateFpReductions(
     "iree-llvmcpu-reassociate-fp-reductions",
     llvm::cl::desc("Enables reassociation for FP reductions"),
-    llvm::cl::init(false));
+    llvm::cl::init(true));
 
 static llvm::cl::opt<bool> clInstrumentMemoryAccesses{
     "iree-llvmcpu-instrument-memory-accesses",
@@ -84,7 +84,7 @@ extern llvm::cl::opt<std::string> clCPUCodegenTransformDialectDebugTransformTag;
 struct LinalgCPUVectorLoweringPassOptions : LinalgVectorLoweringPassOptions {
   LinalgCPUVectorLoweringPassOptions() : LinalgVectorLoweringPassOptions() {
     lowerVectorTransposeTo = "shuffle";
-    lowerVectorMultiReductionTo = "innerreduction";
+    lowerVectorMultiReductionTo = "innerparallel";
   }
 };
 
