@@ -233,14 +233,15 @@ static LogicalResult getTileAndFuseOptionsFromConfig(
 
 /// Default method to initialize the split reduction size in IREE. These could
 /// be overriden by the command line options if specified.
-static FailureOr<int64_t> getSplitReductionSizeFromConfig(func::FuncOp funcOp) {
+static FailureOr<std::pair<int64_t, uint64_t>> getSplitReductionSizeFromConfig(
+    func::FuncOp funcOp) {
   FailureOr<Operation *> rootOp = getRootOp(funcOp);
   if (failed(rootOp)) {
     return failure();
   }
   unsigned numTileLevels =
       mlir::iree_compiler::getNumTileLevels(rootOp.value());
-  assert(numTileLevels >= 1 && "at least 1 tiling level must be present");
+  assert(numTileLevels >= 2 && "at least 2 tiling levels must be present");
 
   // The last one is the reduction dimension.
   auto reductionSizes =
@@ -248,7 +249,13 @@ static FailureOr<int64_t> getSplitReductionSizeFromConfig(func::FuncOp funcOp) {
   if (reductionSizes.size() == 0) {
     return failure();
   }
-  return reductionSizes[reductionSizes.size() - 1];
+
+  uint64_t unroll = 1;
+  for (auto i :
+       mlir::iree_compiler::getTileSizes(rootOp.value(), numTileLevels - 2)) {
+    if (i != 0) unroll *= i;
+  }
+  return std::pair(reductionSizes[reductionSizes.size() - 1], unroll);
 }
 
 //===----------------------------------------------------------------------===//
@@ -317,11 +324,13 @@ struct LinalgVectorLoweringPass
 struct CodegenSplitReduction
     : public OpInterfaceRewritePattern<linalg::LinalgOp> {
   CodegenSplitReduction(MLIRContext *context, bool fpReductionReordering,
-                        int64_t size, LinalgTransformationFilter filter,
+                        int64_t size, uint64_t unroll,
+                        LinalgTransformationFilter filter,
                         PatternBenefit benefit = 1)
       : OpInterfaceRewritePattern<linalg::LinalgOp>(context, benefit),
         fpReductionReordering(fpReductionReordering),
         size(size),
+        unroll(unroll),
         filter(std::move(filter)) {}
 
   LogicalResult matchAndRewrite(linalg::LinalgOp op,
@@ -423,28 +432,35 @@ struct CodegenSplitReduction
     if (failed(tileRes)) return failure();
     rewriter.replaceOp(splitRes->splitLinalgOp, tileRes->replacements);
 
+    // 4) Perform unrolling of the reduction loop.
+    auto result = loopUnrollByFactor(tileRes->loops[0], unroll);
+    if (failed(result)) return failure();
+
     return success();
   }
 
  private:
   bool fpReductionReordering;
   int64_t size;
+  uint64_t unroll;
   LinalgTransformationFilter filter;
 };
 
 void LinalgSplitReductionPass::runOnOperation() {
   func::FuncOp funcOp = getOperation();
   int64_t useSize = size.getValue();
+  uint64_t unroll = 1;
   if (useSize == 0) {
     auto splitReductionOptions = getSplitReductionSizeFromConfig(funcOp);
     if (failed(splitReductionOptions)) {
       return;
     }
-    useSize = *splitReductionOptions;
+    useSize = splitReductionOptions->first;
+    unroll = splitReductionOptions->second;
   }
   RewritePatternSet patterns(&getContext());
   patterns.add<CodegenSplitReduction>(
-      &getContext(), fpReductionReordering, useSize,
+      &getContext(), fpReductionReordering, useSize, unroll,
       LinalgTransformationFilter(
           ArrayRef<StringAttr>{},
           StringAttr::get(&getContext(), "CODEGEN_SPLIT")));
