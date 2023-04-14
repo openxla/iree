@@ -37,6 +37,7 @@
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
+#include "mlir/Dialect/Vector/Transforms/LoweringPatterns.h"
 #include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
 #include "mlir/Interfaces/VectorInterfaces.h"
 #include "mlir/Pass/Pass.h"
@@ -149,7 +150,7 @@ void populateVectorizationPatterns(MLIRContext *context,
 }
 
 template <typename ExtOpTy>
-Optional<SmallVector<int64_t>> getExtOpVectorShape(
+std::optional<SmallVector<int64_t>> getExtOpVectorShape(
     ExtOpTy op, ArrayRef<int64_t> nativeShape) {
   auto insert =
       op.getOperand().template getDefiningOp<vector::InsertStridedSliceOp>();
@@ -169,7 +170,7 @@ Optional<SmallVector<int64_t>> getExtOpVectorShape(
 
 /// Returns vector shape matching native cooperative op sizes for unrolling
 /// high-D vectors.
-Optional<SmallVector<int64_t>> getCooperativeOpVectorShape(
+std::optional<SmallVector<int64_t>> getCooperativeOpVectorShape(
     Operation *op, ArrayRef<int64_t> nativeShape) {
   // Unroll vector.contract ops according to native cooperative matrix size.
   if (auto contractOp = dyn_cast<vector::ContractionOp>(op)) {
@@ -333,7 +334,7 @@ class SPIRVTileToCooperativeOpsPass final
     // Then tile and distribute to subgroups.
 
     {
-      Optional<int> subgroupSize = getSPIRVSubgroupSize(funcOp);
+      std::optional<int> subgroupSize = getSPIRVSubgroupSize(funcOp);
       if (!subgroupSize) {
         funcOp.emitError("failed to query subgroup size");
         return signalPassFailure();
@@ -350,7 +351,9 @@ class SPIRVTileToCooperativeOpsPass final
 
       RewritePatternSet canonicalizationPatterns =
           linalg::getLinalgTilingCanonicalizationPatterns(context);
-      populateFoldAffineMinInDistributedLoopsPatterns(canonicalizationPatterns);
+      SmallVector<int64_t> numWorkgroups = getStaticNumWorkgroups(funcOp);
+      populateFoldAffineMinInDistributedLoopsPatterns(canonicalizationPatterns,
+                                                      numWorkgroups);
       if (failed(applyPatternsAndFoldGreedily(
               funcOp, std::move(canonicalizationPatterns)))) {
         return signalPassFailure();

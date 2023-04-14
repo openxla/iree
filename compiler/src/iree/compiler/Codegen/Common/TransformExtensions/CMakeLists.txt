@@ -55,10 +55,12 @@ iree_cc_library(
     MLIRSCFTransforms
     MLIRSCFUtils
     MLIRTensorDialect
+    MLIRTensorTransformOps
     MLIRTensorTransforms
     MLIRTransformDialect
     MLIRTransforms
     MLIRVectorDialect
+    MLIRVectorToGPU
     MLIRVectorTransforms
     iree::compiler::Codegen::Common::CommonPasses
     iree::compiler::Codegen::Interfaces::BufferizationInterfaces

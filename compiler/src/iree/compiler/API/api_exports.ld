@@ -6,6 +6,7 @@ VER_0 {
     ireeCompilerErrorDestroy;
     ireeCompilerErrorGetMessage;
     ireeCompilerGetAPIVersion;
+    ireeCompilerGetProcessCLArgs;
     ireeCompilerGlobalInitialize;
     ireeCompilerGlobalShutdown;
     ireeCompilerInvocationCreate;
@@ -27,8 +28,10 @@ VER_0 {
     ireeCompilerOptionsSetFlags;
     ireeCompilerOutputDestroy;
     ireeCompilerOutputKeep;
+    ireeCompilerOutputMapMemory;
     ireeCompilerOutputOpenFD;
     ireeCompilerOutputOpenFile;
+    ireeCompilerOutputOpenMembuffer;
     ireeCompilerOutputWrite;
     ireeCompilerRegisterAllDialects;
     ireeCompilerRegisterAllPasses;
@@ -39,6 +42,7 @@ VER_0 {
     ireeCompilerSessionDestroy;
     ireeCompilerSessionGetFlags;
     ireeCompilerSessionSetFlags;
+    ireeCompilerSetupGlobalCL;
     ireeCompilerSourceDestroy;
     ireeCompilerSourceOpenFile;
     ireeCompilerSourceSplit;
@@ -294,6 +298,7 @@ VER_0 {
     mlirF64TypeGet;
     mlirFlatSymbolRefAttrGet;
     mlirFlatSymbolRefAttrGetValue;
+    mlirFloat8E4M3B11FNUZTypeGet;
     mlirFloat8E4M3FNTypeGet;
     mlirFloat8E4M3FNUZTypeGet;
     mlirFloat8E5M2FNUZTypeGet;
@@ -529,6 +534,7 @@ VER_0 {
     mlirTypeIsAF16;
     mlirTypeIsAF32;
     mlirTypeIsAF64;
+    mlirTypeIsAFloat8E4M3B11FNUZ;
     mlirTypeIsAFloat8E4M3FN;
     mlirTypeIsAFloat8E4M3FNUZ;
     mlirTypeIsAFloat8E5M2;

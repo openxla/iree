@@ -18,6 +18,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Interfaces/ValueBoundsOpInterface.h"
 
 #define DEBUG_TYPE "iree-codegen-transforms"
 
@@ -126,7 +127,9 @@ std::optional<Value> hoistOneStaticallyBoundAllocation(
       continue;
     }
     Value dynamicSize = dynamicSizes[index++];
-    auto ub = linalg::getConstantUpperBoundForIndex(dynamicSize);
+    auto ub = ValueBoundsConstraintSet::computeConstantBound(
+        presburger::BoundType::UB, dynamicSize, /*dim=*/std::nullopt,
+        /*stopCondition=*/nullptr, /*closedUB=*/true);
     if (failed(ub)) {
       return std::nullopt;
     }
@@ -258,7 +261,7 @@ namespace {
 
 // TODO(antigainst): enable dynamic shape support once they are needed.
 template <typename TensorReshapeOp>
-static Optional<Value> getStaticReshapeOpSrc(TensorReshapeOp reshapeOp) {
+static std::optional<Value> getStaticReshapeOpSrc(TensorReshapeOp reshapeOp) {
   auto reshapeSrcType =
       reshapeOp.getSrc().getType().template cast<ShapedType>();
   auto reshapeDstType = reshapeOp.getType().template cast<ShapedType>();
@@ -293,7 +296,7 @@ struct FoldReshapeIntoInterfaceTensorLoad : OpRewritePattern<TensorReshapeOp> {
 
   LogicalResult matchAndRewrite(TensorReshapeOp reshapeOp,
                                 PatternRewriter &rewriter) const override {
-    Optional<Value> reshapeSrc =
+    std::optional<Value> reshapeSrc =
         getStaticReshapeOpSrc<TensorReshapeOp>(reshapeOp);
     if (!reshapeSrc) return failure();
 
@@ -370,7 +373,7 @@ struct FoldReshapeIntoInterfaceTensorStore
       return failure();
 
     // Dynamic shapes are currently unsupported.
-    Optional<Value> reshapeSrc =
+    std::optional<Value> reshapeSrc =
         isa<tensor::CollapseShapeOp>(reshapeOp)
             ? getStaticReshapeOpSrc<tensor::CollapseShapeOp>(
                   cast<tensor::CollapseShapeOp>(reshapeOp))

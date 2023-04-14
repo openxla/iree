@@ -33,6 +33,8 @@ iree_cc_library(
     ::LLVMGPUExtensionsOpGen
     IREEDialectsTransforms
     IREELinalgTransformDialect
+    LLVMSupport
+    MLIRAffineDialect
     MLIRArithDialect
     MLIRBufferizationDialect
     MLIRFuncDialect
@@ -47,6 +49,7 @@ iree_cc_library(
     MLIRPDLDialect
     MLIRPass
     MLIRSCFDialect
+    MLIRTensorTransformOps
     MLIRTransformDialect
     MLIRTransforms
     MLIRVectorDialect

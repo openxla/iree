@@ -4,6 +4,7 @@ _ireeCompilerEnumerateRegisteredHALTargetBackends
 _ireeCompilerErrorDestroy
 _ireeCompilerErrorGetMessage
 _ireeCompilerGetAPIVersion
+_ireeCompilerGetProcessCLArgs
 _ireeCompilerGlobalInitialize
 _ireeCompilerGlobalShutdown
 _ireeCompilerInvocationCreate
@@ -25,8 +26,10 @@ _ireeCompilerOptionsGetFlags
 _ireeCompilerOptionsSetFlags
 _ireeCompilerOutputDestroy
 _ireeCompilerOutputKeep
+_ireeCompilerOutputMapMemory
 _ireeCompilerOutputOpenFD
 _ireeCompilerOutputOpenFile
+_ireeCompilerOutputOpenMembuffer
 _ireeCompilerOutputWrite
 _ireeCompilerRegisterAllDialects
 _ireeCompilerRegisterAllPasses
@@ -37,6 +40,7 @@ _ireeCompilerSessionCreate
 _ireeCompilerSessionDestroy
 _ireeCompilerSessionGetFlags
 _ireeCompilerSessionSetFlags
+_ireeCompilerSetupGlobalCL
 _ireeCompilerSourceDestroy
 _ireeCompilerSourceOpenFile
 _ireeCompilerSourceSplit
@@ -292,6 +296,7 @@ _mlirF32TypeGet
 _mlirF64TypeGet
 _mlirFlatSymbolRefAttrGet
 _mlirFlatSymbolRefAttrGetValue
+_mlirFloat8E4M3B11FNUZTypeGet
 _mlirFloat8E4M3FNTypeGet
 _mlirFloat8E4M3FNUZTypeGet
 _mlirFloat8E5M2FNUZTypeGet
@@ -527,6 +532,7 @@ _mlirTypeIsAComplex
 _mlirTypeIsAF16
 _mlirTypeIsAF32
 _mlirTypeIsAF64
+_mlirTypeIsAFloat8E4M3B11FNUZ
 _mlirTypeIsAFloat8E4M3FN
 _mlirTypeIsAFloat8E4M3FNUZ
 _mlirTypeIsAFloat8E5M2

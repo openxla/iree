@@ -280,7 +280,7 @@ endfunction()
 # the empty string.
 #
 # Other values are parsed as "arch:features", the parsed arch is matched with
-# `CMAKE_SYSTEM_PROCESSOR`, `_ENABLED` is set to "TRUE" if and only if they
+# `IREE_ARCH`, `_ENABLED` is set to "TRUE" if and only if they
 # match, `_TARGET_CPU_FEATURES_SUFFIX` is set to a string based on the
 # features that is appropriate to include in a CMake target or test name, and
 # More than one target cpu feature is currently unsupported.
@@ -308,7 +308,7 @@ _FILTER_ARCH:_TARGET_CPU_FEATURES. Got: ${_INPUT_TARGET_CPU_FEATURES}")
   # TARGET_CPU_FEATURES_VARIANT is of the form _FILTER_ARCH:_TARGET_CPU_FEATURE.
   list(GET _COMPONENTS 0 _FILTER_ARCH)
   list(GET _COMPONENTS 1 _TARGET_CPU_FEATURES)
-  if(_FILTER_ARCH STREQUAL CMAKE_SYSTEM_PROCESSOR)
+  if(_FILTER_ARCH STREQUAL IREE_ARCH)
     set(_ENABLED "TRUE" PARENT_SCOPE)
     set(_TARGET_CPU_FEATURES "${_TARGET_CPU_FEATURES}" PARENT_SCOPE)
     # TODO: the logic to generate the suffix from the list of target CPU features

@@ -45,15 +45,16 @@ def _dump_cmds_of_generation_config(
   imported_model = gen_config.imported_model
   imported_model_path = iree_artifacts.get_imported_model_path(
       imported_model=imported_model, root_path=root_path)
-  module_path = iree_artifacts.get_module_dir_path(
-      module_generation_config=gen_config,
-      root_path=root_path) / iree_artifacts.MODULE_FILENAME
+  module_dir_path = iree_artifacts.get_module_dir_path(
+      module_generation_config=gen_config, root_path=root_path)
+  module_path = module_dir_path / iree_artifacts.MODULE_FILENAME
   compile_cmds = [
       IREE_COMPILER_NAME,
       str(imported_model_path), "-o",
       str(module_path)
   ]
-  compile_cmds += gen_config.materialize_compile_flags()
+  compile_cmds += gen_config.materialize_compile_flags(
+      module_dir_path=module_dir_path)
   compile_cmd_str = _convert_to_cmd_string(compile_cmds)
 
   if imported_model.import_config.tool == iree_definitions.ImportTool.NONE:
@@ -70,7 +71,6 @@ def _dump_cmds_of_generation_config(
         model=imported_model.model)
     import_cmd_str = _convert_to_cmd_string(import_cmds)
 
-  # TODO(#12215): Print benchmark name to make them searchable by keywords.
   # Insert a blank line after each command to help read with line wrap.
   return [
       "Compile Module:", compile_cmd_str, "", "Import Model:", import_cmd_str,
@@ -89,7 +89,6 @@ def _dump_cmds_from_run_config(
 
   run_cmds = [run_config.tool.value, f"--module={module_path}"]
   run_cmds += run_config.materialize_run_flags()
-  # TODO(#12215): Include benchmark name to make them searchable by keywords.
   # Insert a blank line after the command to help read with line wrap.
   lines = ["Run Module:", _convert_to_cmd_string(run_cmds), ""]
   lines += _dump_cmds_of_generation_config(gen_config=gen_config,
@@ -116,6 +115,7 @@ def _dump_cmds_handler(e2e_test_artifacts_dir: pathlib.Path,
         lines.append("################")
         lines.append("")
         lines.append(f"Execution Benchmark ID: {run_config.composite_id}")
+        lines.append(f"Name: {run_config}")
         lines.append(f"Target Device: {target_device}")
         lines.append("")
         lines += _dump_cmds_from_run_config(run_config=run_config,
@@ -133,6 +133,7 @@ def _dump_cmds_handler(e2e_test_artifacts_dir: pathlib.Path,
       lines.append("################")
       lines.append("")
       lines.append(f"Compilation Benchmark ID: {gen_config.composite_id}")
+      lines.append(f"Name: {gen_config}")
       lines.append("")
       lines += _dump_cmds_of_generation_config(gen_config=gen_config,
                                                root_path=e2e_test_artifacts_dir)

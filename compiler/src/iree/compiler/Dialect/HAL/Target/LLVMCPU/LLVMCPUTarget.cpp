@@ -33,10 +33,19 @@
 #include "mlir/Dialect/PDL/IR/PDL.h"
 #include "mlir/Dialect/PDLInterp/IR/PDLInterp.h"
 #include "mlir/Dialect/Transform/IR/TransformDialect.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
 
 #define DEBUG_TYPE "iree-llvm-cpu-target"
+
+// TODO(ravishankarm): This is redundant w.r.t `iree-vmvx-enable-microkernels`
+// flag. Fold these into either a single flag, or not have the flag at all.
+static llvm::cl::opt<bool> clEnableCPUMicrokernels(
+    "iree-llvmcpu-enable-microkernels",
+    llvm::cl::desc(
+        "Enables microkernel lowering for llvmcpu backend (experimental)"),
+    llvm::cl::init(false));
 
 namespace mlir {
 namespace iree_compiler {
@@ -126,6 +135,7 @@ class LLVMCPUTargetBackend final : public TargetBackend {
   std::string name() const override { return "llvm-cpu"; }
 
   void getDependentDialects(DialectRegistry &registry) const override {
+    mlir::registerBuiltinDialectTranslation(registry);
     mlir::registerLLVMDialectTranslation(registry);
     // TODO: make inclusion of ArmNeon conditional?
     // clang-format off
@@ -747,6 +757,9 @@ class LLVMCPUTargetBackend final : public TargetBackend {
     // build the TTI the right way.
     addConfig("native_vector_size",
               IntegerAttr::get(IndexType::get(context), config_.vectorSize));
+
+    // Check if microkernels are to be enabled.
+    addConfig("ukernels", BoolAttr::get(context, clEnableCPUMicrokernels));
 
     return IREE::HAL::ExecutableTargetAttr::get(
         context, StringAttr::get(context, "llvm-cpu"),

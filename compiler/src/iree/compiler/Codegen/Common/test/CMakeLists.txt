@@ -18,20 +18,25 @@ iree_lit_test_suite(
     "bufferize_copy_only_dispatches.mlir"
     "canonicalize_interface_load_store.mlir"
     "convert_to_destination_passing_style.mlir"
+    "convolutions.mlir"
     "dead_alloc.mlir"
+    "decompose_affine_ops.mlir"
     "decompose_linalg_generic.mlir"
+    "decompose_pack_unpack_ops.mlir"
     "distribute_gpu_shared_memory.mlir"
     "eliminate_empty_tensors.mlir"
     "erase_hal_descriptor_type.mlir"
-    "fixup_subspan_with_offsets.mlir"
+    "extract_address_computation.mlir"
     "flatten_memref_subspan.mlir"
     "fold_affine_min_in_distributed_loops.mlir"
+    "fold_affine_min_of_block_id.mlir"
     "fold_tensor_extract_op.mlir"
     "forop_canonicalization.mlir"
     "gpu_pipeline.mlir"
     "gpu_vectorization.mlir"
     "hoist_statically_bound_allocations.mlir"
     "iree_comprehensive_bufferize.mlir"
+    "iree_expand_strided_metadata.mlir"
     "lower_ukernel_to_calls.mlir"
     "pad_dynamic_alloc.mlir"
     "polynomial_approximation.mlir"
@@ -47,10 +52,10 @@ iree_lit_test_suite(
     "tile_reduction.mlir"
     "transform_buffer_opt.mlir"
     "transform_dialect_apply_pattern_op.mlir"
+    "transform_im2col_workgroup.mlir"
     "transform_ops_invalid.mlir"
     "transpose_canonicalization.mlir"
     "type_propagation.mlir"
-    "vectorize_pack_unpack_ops.mlir"
     "vectorize_tensor_pad.mlir"
     "warp_reduction.mlir"
     "workgroup_specialization.mlir"
@@ -58,6 +63,7 @@ iree_lit_test_suite(
     FileCheck
     iree-opt
   DATA
+    convolution_match_spec.mlir
     reductions_codegen_spec.mlir
     reductions_match_spec.mlir
 )

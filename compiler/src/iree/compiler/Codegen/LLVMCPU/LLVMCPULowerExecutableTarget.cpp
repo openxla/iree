@@ -143,7 +143,7 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
     // is fine.
     llvm::StringMap<IREE::HAL::ExecutableExportOp> exportOps =
         getAllEntryPoints(moduleOp);
-    Optional<IREE::Codegen::TranslationInfoAttr> translationInfo;
+    std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo;
     for (auto &it : exportOps) {
       auto exportOp = it.second;
       if (IREE::Codegen::TranslationInfoAttr currTranslationInfo =
@@ -204,7 +204,7 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
               CPUDoubleTilingExpert:
             addMultiTilingExpertPassPipeline(
                 executableLoweringPipeline,
-                static_cast<int>(StrategyTilingLevel::NumStrategyTileLevels),
+                static_cast<int>(TilingLevel::NumTileLevels),
                 /*enablePeeling=*/false, enableVectorMasking, lowerToAVX2);
             break;
           case IREE::Codegen::DispatchLoweringPassPipeline::
@@ -216,7 +216,7 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
               CPUDoubleTilingPeelingExpert:
             addMultiTilingExpertPassPipeline(
                 executableLoweringPipeline,
-                static_cast<int>(StrategyTilingLevel::NumStrategyTileLevels),
+                static_cast<int>(TilingLevel::NumTileLevels),
                 /*enablePeeling=*/true, enableVectorMasking, lowerToAVX2);
             break;
           case IREE::Codegen::DispatchLoweringPassPipeline::
@@ -226,7 +226,7 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
             break;
           case IREE::Codegen::DispatchLoweringPassPipeline::Mmt4dTilingExpert:
             addMmt4dTilingExpertPassPipeline(executableLoweringPipeline,
-                                             enableVectorMasking);
+                                             enableMicrokernels);
             break;
           case IREE::Codegen::DispatchLoweringPassPipeline::CPUDataTiling:
             addCPUDataTilingPipeline(executableLoweringPipeline);

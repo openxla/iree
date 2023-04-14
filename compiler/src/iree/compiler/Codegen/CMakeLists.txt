@@ -29,6 +29,8 @@ iree_cc_library(
   DEPS
     ::PassesIncGen
     MLIRLinalgTransforms
+    MLIRMemRefDialect
+    MLIRNVGPUDialect
     MLIRPass
     MLIRTransforms
     iree::compiler::Codegen::Dialect::IREECodegenDialect
@@ -50,7 +52,6 @@ iree_cc_library(
     iree::compiler::Codegen::LLVMCPU
     iree::compiler::Codegen::LLVMGPU
     iree::compiler::Codegen::SPIRV
-    iree::compiler::Codegen::Sandbox
     iree::compiler::Codegen::VMVX
     iree::compiler::Codegen::WGSL
   PUBLIC

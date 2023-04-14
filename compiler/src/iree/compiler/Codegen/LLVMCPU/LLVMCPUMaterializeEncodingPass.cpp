@@ -13,7 +13,7 @@
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/MemRef/Transforms/Passes.h"
+#include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/Transforms/Transforms.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -54,8 +54,8 @@ static MatmulTileParams chooseMatmulTileParamsX86_64(
   switch (type) {
     case MatmulType::F32F32F32:
       if (hasFeature(target, "+avx512f")) return {16, 1, 16};
-      if (hasFeature(target, "+avx2")) {
-        // Note: for good performance, most +avx2 users will also want to add
+      if (hasFeature(target, "+avx")) {
+        // Note: for good performance, most +avx users will also want to add
         // +fma, but that's a local instruction selection detail and the tile
         // layout is unaffected, as there are enough registers even with the
         // need for intermediate product registers when +fma is not used.
@@ -116,7 +116,7 @@ void LLVMCPUMaterializeEncodingPass::runOnOperation() {
   MaterializeEncodingTypeConverter typeConverter(
       [targetAttr](
           RankedTensorType tensorType) -> FailureOr<MaterializeEncodingInfo> {
-        Optional<TensorEncoding> encoding = getEncoding(tensorType);
+        std::optional<TensorEncoding> encoding = getEncoding(tensorType);
         if (!encoding) return failure();
 
         auto matmulType = getMatmulType(*encoding);

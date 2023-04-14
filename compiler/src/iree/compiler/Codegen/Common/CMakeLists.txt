@@ -89,8 +89,9 @@ iree_cc_library(
     "CleanupBufferAllocViewPass.cpp"
     "ConcretizePadResultShape.cpp"
     "ConvertToDestinationPassingStylePass.cpp"
+    "DecomposeAffineOpsPass.cpp"
+    "DecomposePackUnPackOps.cpp"
     "EraseHALDescriptorTypeFromMemRef.cpp"
-    "FixupSubspanWithOffsets.cpp"
     "FlattenMemRefSubspanPass.cpp"
     "FoldTensorExtractOpPass.cpp"
     "ForOpCanonicalizationPass.cpp"
@@ -98,6 +99,7 @@ iree_cc_library(
     "GPUPipelining.cpp"
     "HoistStaticallyBoundAllocations.cpp"
     "IREEComprehensiveBufferizePass.cpp"
+    "IREEExpandStridedMetadata.cpp"
     "InstrumentMemoryAccesses.cpp"
     "LowerUKernelsToCalls.cpp"
     "MaterializeEncodingIntoPackUnPack.cpp"
@@ -110,7 +112,6 @@ iree_cc_library(
     "TileAndDistributeToWorkgroupsPass.cpp"
     "TileDispatchUsingInterface.cpp"
     "TypePropagationPass.cpp"
-    "VectorizePackUnPackOps.cpp"
     "VectorizePad.cpp"
     "WorkgroupSpecializationPass.cpp"
   DEPS
@@ -119,6 +120,7 @@ iree_cc_library(
     IREELinalgExtTransforms
     LLVMSupport
     MLIRAffineDialect
+    MLIRAffineTransforms
     MLIRAffineUtils
     MLIRAnalysis
     MLIRArithDialect
@@ -175,11 +177,14 @@ iree_cc_library(
   NAME
     Common
   HDRS
+    "ExtractAddressComputation.h"
     "GPUPatterns.h"
     "LinalgOpInfo.h"
     "UserConfig.h"
   SRCS
+    "DecomposeConvolutionToLowerDimOps.cpp"
     "DecomposeLinalgGeneric.cpp"
+    "ExtractAddressComputation.cpp"
     "FoldAffineMinInDistributedLoops.cpp"
     "GPUDistributeSharedMemoryCopy.cpp"
     "GPUMultiBuffering.cpp"
@@ -201,6 +206,7 @@ iree_cc_library(
     IREELinalgExtPasses
     IREELinalgExtTransforms
     LLVMSupport
+    MLIRAffineAnalysis
     MLIRAffineDialect
     MLIRAffineUtils
     MLIRAnalysis
@@ -234,6 +240,7 @@ iree_cc_library(
     MLIRTilingInterface
     MLIRTransformDialect
     MLIRTransforms
+    MLIRValueBoundsOpInterface
     MLIRVectorDialect
     MLIRVectorToSCF
     MLIRVectorTransforms

@@ -46,6 +46,8 @@ iree_cc_library(
     IREELinalgExtDialect
     IREELinalgExtPasses
     IREELinalgExtTransforms
+    IREELinalgTransformDialect
+    IREELinalgTransformDialectPasses
     LLVMSupport
     MLIRAffineAnalysis
     MLIRAffineDialect
@@ -57,6 +59,8 @@ iree_cc_library(
     MLIRArithTransforms
     MLIRArithUtils
     MLIRBufferizationDialect
+    MLIRComplexToSPIRV
+    MLIRComplexToStandard
     MLIRControlFlowToSPIRV
     MLIRFuncDialect
     MLIRFuncToSPIRV

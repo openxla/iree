@@ -22,7 +22,9 @@ iree_cc_library(
     "ConvertToLLVM.cpp"
     "ConvertToNVVM.cpp"
     "ConvertToROCDL.cpp"
+    "ExtractAddressComputationGPUPass.cpp"
     "KernelConfig.cpp"
+    "LLVMGPUCheckIRBeforeLLVMConversion.cpp"
     "LLVMGPUDistribute.cpp"
     "LLVMGPULowerExecutableTarget.cpp"
     "LLVMGPUPackSharedMemoryAlloc.cpp"
@@ -49,6 +51,7 @@ iree_cc_library(
     MLIRArithToLLVM
     MLIRArithTransforms
     MLIRBufferizationDialect
+    MLIRComplexToLLVM
     MLIRComplexToStandard
     MLIRControlFlowToLLVM
     MLIRFuncDialect
@@ -85,6 +88,7 @@ iree_cc_library(
     MLIRTensorDialect
     MLIRTransformDialect
     MLIRTransforms
+    MLIRValueBoundsOpInterface
     MLIRVectorDialect
     MLIRVectorToGPU
     MLIRVectorToLLVM

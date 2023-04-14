@@ -83,6 +83,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Support/LogicalResult.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 
 static llvm::cl::opt<std::string> input_file_flag{
@@ -270,7 +271,10 @@ Status PrepareModule(std::string target_backend,
   printf("Compiling for target backend '%s'...\n", target_backend.c_str());
   mlir::PassManager pass_manager(mlir_module->getContext());
   pass_manager.enableVerifier(verify_passes_flag);
-  mlir::applyPassManagerCLOptions(pass_manager);
+  if (failed(mlir::applyPassManagerCLOptions(pass_manager))) {
+    return iree_make_status(IREE_STATUS_INTERNAL,
+                            "failed to apply pass manager CL options");
+  }
   mlir::applyDefaultTimingPassManagerCLOptions(pass_manager);
   BuildDefaultIREEVMTransformPassPipeline(pass_manager);
   if (failed(pass_manager.run(mlir_module.get()))) {
@@ -367,8 +371,8 @@ Status EvaluateFunction(iree_vm_context_t* context, iree_hal_device_t* device,
 
   // Prepare outputs list to accept the results from the invocation.
   vm::ref<iree_vm_list_t> outputs;
-  IREE_RETURN_IF_ERROR(iree_vm_list_create(/*element_type=*/nullptr, 16,
-                                           host_allocator, &outputs));
+  IREE_RETURN_IF_ERROR(iree_vm_list_create(iree_vm_make_undefined_type_def(),
+                                           16, host_allocator, &outputs));
 
   // Synchronously invoke the function.
   IREE_RETURN_IF_ERROR(iree_vm_invoke(
@@ -575,6 +579,7 @@ extern "C" int main(int argc_llvm, char** argv_llvm) {
   mlir::iree_compiler::registerAllDialects(registry);
   mlir::iree_compiler::registerHALTargetBackends();
   mlir::iree_compiler::registerVMTargets();
+  mlir::registerBuiltinDialectTranslation(registry);
   mlir::registerLLVMDialectTranslation(registry);
   // Make sure command line options are registered.
   // Flag options structs (must resolve prior to CLI parsing).
