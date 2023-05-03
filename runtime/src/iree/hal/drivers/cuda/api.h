@@ -63,21 +63,11 @@ typedef struct iree_hal_cuda_device_params_t {
   // identify slow dispatches and refine from there; be wary of whole-program
   // tracing with this enabled.
   bool stream_tracing;
-
-  // Unowned provider of default channel configuration and creation.
-  // Must remain valid for the lifetime of the driver/device.
-  iree_hal_channel_provider_t channel_provider;
 } iree_hal_cuda_device_params_t;
 
 // Initializes |out_params| to default values.
 IREE_API_EXPORT void iree_hal_cuda_device_params_initialize(
     iree_hal_cuda_device_params_t* out_params);
-
-// Calls ncclGetUniqueId and returns the resulting unique ID.
-// Only valid if NCCL is initialized by having set a channel provider when the
-// device was configured.
-IREE_API_EXPORT iree_status_t iree_hal_cuda_nccl_get_unique_id(
-    iree_hal_device_t* device, iree_hal_cuda_nccl_id_t* out_id);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_cuda_driver_t
