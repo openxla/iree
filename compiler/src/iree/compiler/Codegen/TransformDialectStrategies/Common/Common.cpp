@@ -94,10 +94,10 @@ void mlir::iree_compiler::createTransformRegion(
   auto topLevelTransformModule = b.create<ModuleOp>(loc);
   Region &topLevelTransformRegion = topLevelTransformModule.getBodyRegion();
   b.setInsertionPointToStart(&topLevelTransformRegion.front());
-  auto pdlOperationType = pdl::OperationType::get(b.getContext());
+  auto anyOpType = transform::AnyOpType::get(ctx);
   auto sequence = b.create<transform::SequenceOp>(
-      loc, TypeRange{}, transform::FailurePropagationMode::Propagate,
-      pdlOperationType, [&](OpBuilder &b, Location loc, Value variantH) {
+      loc, TypeRange{}, transform::FailurePropagationMode::Propagate, anyOpType,
+      [&](OpBuilder &b, Location loc, Value variantH) {
         ImplicitLocOpBuilder ib(loc, b);
         buildStrategy(ib, variantH);
         b.create<transform::YieldOp>(loc);
