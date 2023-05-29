@@ -56,6 +56,26 @@ BERT_LARGE_TF_FP32_SEQLEN384 = common_definitions.Model(
     entry_function="serving_default",
     input_types=["1x384xi32", "1x384xi32", "1x384xi32"])
 
+TF_TUNED_MODELS_ROOT_DIR = "https://storage.googleapis.com/iree-jerry-test/tuning"
+
+TUNED_BERT_LARGE_1024X384_FP32_TF = common_definitions.Model(
+    id=unique_ids.TUNED_MODEL_BERT_LARGE_1024X384_FP32_TF,
+    name="TunedBertLargeTFBatch1024",
+    tags=["fp32", "seqlen384", "tensorflow", "bert-variant", "batch-1024"],
+    source_type=common_definitions.ModelSourceType.EXPORTED_LINALG_MLIR,
+    source_url=f"{TF_TUNED_MODELS_ROOT_DIR}/tuned_bert_large_batch-1024.mlir",
+    entry_function="forward",
+    input_types=["1024x384xi32", "1024x384xi32"])
+
+LINALG_BERT_LARGE_1024X384_FP32_TF = common_definitions.Model(
+    id=unique_ids.LINALG_MODEL_BERT_LARGE_1024X384_FP32_TF,
+    name="LinalgBertLargeTFBatch1024",
+    tags=["fp32", "seqlen384", "tensorflow", "bert-variant", "batch-1024"],
+    source_type=common_definitions.ModelSourceType.EXPORTED_LINALG_MLIR,
+    source_url=f"{TF_TUNED_MODELS_ROOT_DIR}/bert_large_batch-1024.mlir",
+    entry_function="forward",
+    input_types=["1024x384xi32", "1024x384xi32"])
+
 TF_MODELS_ROOT_DIR = "https://storage.googleapis.com/iree-model-artifacts/tensorflow/tf_models_2.12.0_1683544084"
 
 # Derived from https://huggingface.co/docs/transformers/model_doc/bert#transformers.TFBertModel.
