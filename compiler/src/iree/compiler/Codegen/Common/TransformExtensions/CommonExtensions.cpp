@@ -169,8 +169,6 @@ void transform_dialect::ApplyPatternsOp::build(
   ADD_PATTERN(lowerVectorMasks, getLowerVectorMasksAttrName)
   ADD_PATTERN(prepareVectorToMma, getPrepareVectorToMmaAttrName)
   ADD_PATTERN(rankReducingLinalg, getRankReducingLinalgAttrName)
-  ADD_PATTERN(rankReducingLinalgViaReshapes,
-              getRankReducingLinalgViaReshapesAttrName)
   ADD_PATTERN(rankReducingVector, getRankReducingVectorAttrName)
   ADD_PATTERN(swapPaddingElideConditional,
               getSwapPaddingElideConditionalAttrName)
@@ -342,12 +340,6 @@ static void addRankReducingLinalgPatterns(RewritePatternSet &patterns) {
   linalg::populateFoldUnitExtentDimsViaSlicesPatterns(patterns);
 }
 
-static void addRankReducingLinalgViaReshapesPatterns(
-    RewritePatternSet &patterns) {
-  populateReshapeToInterfaceTensorPatterns(patterns);
-  linalg::populateFoldUnitExtentDimsViaReshapesPatterns(patterns);
-}
-
 static void addRankReducingVectorPatterns(RewritePatternSet &patterns) {
   vector::populateCastAwayVectorLeadingOneDimPatterns(patterns);
 }
@@ -460,8 +452,6 @@ DiagnosedSilenceableFailure transform_dialect::ApplyPatternsOp::applyToOne(
   if (getLowerVectorMasks()) addLowerVectorMasksPatterns(patterns);
   if (getPrepareVectorToMma()) addPrepareVectorToMmaPatterns(patterns);
   if (getRankReducingLinalg()) addRankReducingLinalgPatterns(patterns);
-  if (getRankReducingLinalgViaReshapes())
-    addRankReducingLinalgViaReshapesPatterns(patterns);
   if (getRankReducingVector()) addRankReducingVectorPatterns(patterns);
   if (getSwappingPatterns())
     addSwappingPatterns(patterns, getSwapPaddingElideConditional());
