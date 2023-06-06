@@ -15,6 +15,8 @@
 #include "iree/compiler/Codegen/Dialect/LoweringConfig.h"
 #include "mlir/Pass/Pass.h"
 
+class TilingConfig;
+
 namespace mlir {
 namespace iree_compiler {
 
@@ -116,14 +118,17 @@ void populateVectorContractCustomKernelsPatterns(
 //----------------------------------------------------------------------------//
 // LLVMCPU backend Pass Pipelines.
 //----------------------------------------------------------------------------//
+
 /// Populates the passes to lower linalg ops on buffers. Currenly this
 /// pipeline is only used for dispatches that just copy data from input
 /// interfaces to output interface.
 void addCPUBufferOpsTileAndVectorizePipeline(OpPassManager &passManager,
+                                             TilingConfig &tilingConfig,
                                              bool enableVectorMasking);
 
 /// Populates the passes to lower ops through data tiling transformations.
-void addCPUDataTilingPipeline(OpPassManager &passManager);
+void addCPUDataTilingPipeline(OpPassManager &passManager,
+                              TilingConfig &tilingConfig);
 
 /// Populates the passes to lower to scalars operations for linalg based
 /// code-generation. This pipeline does not vectorize, but instead just
@@ -131,18 +136,22 @@ void addCPUDataTilingPipeline(OpPassManager &passManager);
 void addCPUDefaultPassPipeline(OpPassManager &passManager);
 
 void addConvTileAndDecomposeExpertPassPipeline(OpPassManager &passManager,
+                                               TilingConfig &tilingConfig,
                                                bool enableVectorMasking);
 
 void addDoubleTilingPadExpertPassPipeline(OpPassManager &passManager,
+                                          TilingConfig &tilingConfig,
                                           bool enableVectorMasking);
 
 /// Populates the passes needed to multi level tile, fuse and vectorize
 /// lowering of linalg ops on tensors to vectors operations.
 void addMmt4dTilingExpertPassPipeline(OpPassManager &passManager,
+                                      TilingConfig &tilingConfig,
                                       bool enableMicrokernels);
 
 void addMultiTilingExpertPassPipeline(OpPassManager &passManager,
-                                      int64_t numLevels, bool enablePeeling,
+                                      TilingConfig &tilingConfig,
+                                      bool enablePeeling,
                                       bool enableVectorMasking,
                                       bool lowerToAVX2);
 
@@ -159,13 +168,13 @@ void addVMVXDefaultPassPipeline(OpPassManager &passManager,
 // Populates the passes needed to do tiling, decomposing, and vectorizing the
 // convolution ops.
 LogicalResult verifyConvTileAndDecomposeExpertConfig(
-    Operation *op, IREE::Codegen::LoweringConfigAttr loweringConfig,
+    Operation *op, TilingConfig &tilingConfig,
     IREE::Codegen::TranslationInfoAttr translationInfo,
     ArrayRef<int64_t> workgroupSize = {});
 
 /// Populates the passes needed to do two-level tile + vectorize of linalg ops.
 LogicalResult verifyDoubleTilingExpertPassPipelineConfig(
-    Operation *op, IREE::Codegen::LoweringConfigAttr loweringConfig,
+    Operation *op, TilingConfig &tilingConfig,
     IREE::Codegen::TranslationInfoAttr translationInfo,
     ArrayRef<int64_t> workgroupSize = {});
 

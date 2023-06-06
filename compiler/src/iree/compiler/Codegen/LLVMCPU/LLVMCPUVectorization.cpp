@@ -257,6 +257,16 @@ void LLVMCPUVectorizationPass::runOnOperation() {
     (void)linalg::vectorize(rewriter, op, vectorSizes, vectorizeGatherAccesses);
   };
 
+  // Canonicalize mask-related ops before we lower them.
+  RewritePatternSet maskCanonPatterns(funcOp.getContext());
+  vector::CreateMaskOp::getCanonicalizationPatterns(maskCanonPatterns,
+                                                    funcOp.getContext());
+  vector::ConstantMaskOp::getCanonicalizationPatterns(maskCanonPatterns,
+                                                      funcOp.getContext());
+  vector::MaskOp::getCanonicalizationPatterns(maskCanonPatterns,
+                                              funcOp.getContext());
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(maskCanonPatterns));
+
   // TODO: Move this down the pipeline once we have the ODM-based masking
   // representation.
   RewritePatternSet vectorizationPatterns(funcOp.getContext());
