@@ -104,6 +104,9 @@ static void buildMHLOInputConversionPassPipelineImpl(OpPassManager &passManager,
   passManager.addNestedPass<func::FuncOp>(mlir::createCanonicalizerPass());
   passManager.addNestedPass<func::FuncOp>(mlir::createCSEPass());
 
+  // Annotate ABI now post all type lowerings.
+  passManager.addNestedPass<func::FuncOp>(createEmitDefaultIREEABIPass());
+
   // Convert to Linalg. After this point, MHLO will be eliminated.
   passManager.addNestedPass<func::FuncOp>(
       mhlo::createLegalizeShapeComputationsPass());
