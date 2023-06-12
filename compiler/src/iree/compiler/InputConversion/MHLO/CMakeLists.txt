@@ -48,6 +48,7 @@ iree_cc_library(
     "ConvertMHLOToLinalgExt.cpp"
     "ConvertMHLOToStableHLO.cpp"
     "FlattenTuplesInCFG.cpp"
+    "MHLOCustomCallsToCalls.cpp"
     "MHLOToLinalgOnTensors.cpp"
     "MHLOToMHLOPreprocessing.cpp"
     "Passes.cpp"
