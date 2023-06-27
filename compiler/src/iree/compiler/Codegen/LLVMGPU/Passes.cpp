@@ -421,6 +421,7 @@ void addGPUPackUnPackPasses(OpPassManager &pm) {
   nestedModulePM.addPass(createCanonicalizerPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       createWorkgroupSpecializationPass());
+  nestedModulePM.addNestedPass<func::FuncOp>(createLLVMGPUTensorPadPass());
   nestedModulePM.addPass(createCanonicalizerPass());
   nestedModulePM.addPass(createCSEPass());
 
