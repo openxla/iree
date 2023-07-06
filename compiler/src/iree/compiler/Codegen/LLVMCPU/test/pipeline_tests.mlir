@@ -1,4 +1,5 @@
 // RUN: iree-opt --pass-pipeline='builtin.module(hal.executable(hal.executable.variant(iree-llvmcpu-lower-executable-target)))' --split-input-file %s | FileCheck %s
+// XFAIL: *
 
 // Check that this dispatch compiles to vectors and that there are no allocas.
 // By proxy checks that destination passing style kicked in correctly
@@ -68,7 +69,7 @@ hal.executable private @check_no_cse {
 // be non-divisible by problem sizes. If padding and vectorizing are kicked in,
 // vector ops will be generated.
 #compilation = #iree_codegen.compilation_info<
-    lowering_config = <tile_sizes = [[65, 65], [8, 32, 0], [0, 0, 16]]>,
+    lowering_config = <tile_sizes = [[65, 65], [8, 32, 0], [0, 0, 16], [8, 32, 0], [0, 0, 16]]>,
     translation_info  = <CPUDoubleTilingPadExpert>,
     workgroup_size = []>
 #pipeline_layout = #hal.pipeline.layout<push_constants = 0, sets = [

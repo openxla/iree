@@ -11,6 +11,7 @@
 #include "mlir/Dialect/Vector/Transforms/LoweringPatterns.h"
 #include "mlir/Dialect/Vector/Transforms/Passes.h"
 #include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
+#include "mlir/Dialect/X86Vector/Transforms.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
@@ -165,6 +166,22 @@ void LLVMCPUVectorLoweringPass::runOnOperation() {
   {
     RewritePatternSet patterns(ctx);
     vector::populateVectorShapeCastLoweringPatterns(patterns);
+    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+  }
+
+  // Lower complex vector mask related ops into simpler ops.
+  {
+    RewritePatternSet patterns(ctx);
+    vector::populateVectorMaskMaterializationPatterns(
+        patterns, /*force32BitVectorIndices=*/false);
+    vector::populateVectorMaskOpLoweringPatterns(patterns);
+    (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+  }
+
+  // FMA mask prop.
+  {
+    RewritePatternSet patterns(ctx);
+    x86vector::avx512::populateFMAMaskBackwardPropagationPatterns(patterns);
     (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
   }
 }

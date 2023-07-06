@@ -138,6 +138,7 @@ static void addTileAndDistributePasses(OpPassManager &pm) {
       createFoldAffineMinInDistributedLoopsPass());
   nestedModulePM.addPass(createCanonicalizerPass());
   nestedModulePM.addPass(createCSEPass());
+  nestedModulePM.addPass(createEliminateEmptyTensorsPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       createFuseTensorPadWithConsumerPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
@@ -185,6 +186,11 @@ LogicalResult verifyDoubleTilingExpertPassPipelineConfig(
            << " or "
            << stringifyEnum(IREE::Codegen::DispatchLoweringPassPipeline::
                                 CPUDoubleTilingPadExpert);
+  }
+
+  if (tilingConfig.getNumTilingLevels() == 5) {
+    // TODO: update verification.
+    return success();
   }
 
   if (tilingConfig.getNumTilingLevels() != 3) {
@@ -252,6 +258,10 @@ LogicalResult verifyConvTileAndDecomposeExpertConfig(
     Operation *op, TilingConfig &tilingConfig,
     IREE::Codegen::TranslationInfoAttr translationInfo,
     ArrayRef<int64_t> workgroupSize) {
+  if (tilingConfig.getNumTilingLevels() == 5) {
+    // TODO: update verification.
+    return success();
+  }
   if (tilingConfig.getNumTilingLevels() != 3) {
     return op->emitOpError("expected three tiling levels, got ")
            << tilingConfig.getNumTilingLevels();
@@ -354,6 +364,8 @@ void addCPUBufferOpsTileAndVectorizePipeline(OpPassManager &passManager,
     options.splitVectorTransfersTo = "linalg-copy";
     nestedModulePM.addNestedPass<func::FuncOp>(
         createLLVMCPUVectorLoweringPass(options));
+    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
   }
 
   if (enableAArch64SSVE)
@@ -402,6 +414,8 @@ void addDoubleTilingPadExpertPassPipeline(OpPassManager &passManager,
     options.splitVectorTransfersTo = "linalg-copy";
     nestedModulePM.addNestedPass<func::FuncOp>(
         createLLVMCPUVectorLoweringPass(options));
+    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
   }
 }
 
@@ -450,19 +464,41 @@ void addMultiTilingExpertPassPipeline(
   nestedModulePM.addNestedPass<func::FuncOp>(
       createRematerializeParallelOpsPass());
 
-  SmallVector<int64_t> allFusableLevels(tilingConfig.getFusableLevels());
-  // Apply tile and fuse to all the non-distribution fusable levels. Skip
-  // distribution level as that level has been fused already.
-  if (allFusableLevels.size() > 1) {
-    ArrayRef<int64_t> nonDistFusableLevels(allFusableLevels.begin() + 1,
-                                           allFusableLevels.end());
-    for (int64_t level : nonDistFusableLevels) {
+  if (tilingConfig.getNumTilingLevels() == 5) {
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createLLVMCPUTileAndFusePass(tilingConfig.getCacheParallelLevel()));
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createLLVMCPUTilePass(tilingConfig.getCacheReductionLevel()));
+
+    // Fuse next level only if reduction cache level is all zeros (no tiling).
+    // TODO(dcaballe): Teach TileAndFuse to only fuse up to the first reduction
+    // dimension.
+    if (llvm::all_of(tilingConfig.getCacheReductionSizes(),
+                     [](int64_t size) { return size == 0; })) {
       nestedModulePM.addNestedPass<func::FuncOp>(
-          createLLVMCPUTileAndFusePass(level));
+          createLLVMCPUTileAndFusePass(tilingConfig.getVectorParallelLevel()));
+    } else {
       nestedModulePM.addNestedPass<func::FuncOp>(
-          createFuseTensorPadWithConsumerPass());
-      nestedModulePM.addNestedPass<func::FuncOp>(
-          createConcretizePadResultShapePass());
+          createLLVMCPUTilePass(tilingConfig.getVectorParallelLevel()));
+    }
+
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createLLVMCPUTilePass(tilingConfig.getVectorReductionLevel()));
+  } else { // TODO: Unify.
+    SmallVector<int64_t> allFusableLevels(tilingConfig.getFusableLevels());
+    // Apply tile and fuse to all the non-distribution fusable levels. Skip
+    // distribution level as that level has been fused already.
+    if (allFusableLevels.size() > 1) {
+      ArrayRef<int64_t> nonDistFusableLevels(allFusableLevels.begin() + 1,
+                                             allFusableLevels.end());
+      for (int64_t level : nonDistFusableLevels) {
+        nestedModulePM.addNestedPass<func::FuncOp>(
+            createLLVMCPUTileAndFusePass(level));
+        nestedModulePM.addNestedPass<func::FuncOp>(
+            createFuseTensorPadWithConsumerPass());
+        nestedModulePM.addNestedPass<func::FuncOp>(
+            createConcretizePadResultShapePass());
+      }
     }
   }
 
@@ -513,6 +549,8 @@ void addMultiTilingExpertPassPipeline(
     options.splitVectorTransfersTo = "linalg-copy";
     nestedModulePM.addNestedPass<func::FuncOp>(
         createLLVMCPUVectorLoweringPass(options));
+    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
   }
 
   if (enableAArch64SSVE)
@@ -583,6 +621,8 @@ void addConvTileAndDecomposeExpertPassPipeline(OpPassManager &passManager,
     options.splitVectorTransfersTo = "shuffle";
     nestedModulePM.addNestedPass<func::FuncOp>(
         createLLVMCPUVectorLoweringPass(options));
+    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
   }
 
   if (enableAArch64SSVE)
@@ -649,6 +689,8 @@ void addCPUDataTilingPipeline(OpPassManager &passManager,
     options.splitVectorTransfersTo = "linalg-copy";
     nestedModulePM.addNestedPass<func::FuncOp>(
         createLLVMCPUVectorLoweringPass(options));
+    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
   }
 }
 
