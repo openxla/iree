@@ -805,6 +805,72 @@ def Util_GlobalStoreIndirectOp : Util_Op<"global.store.indirect", [
 } // OpGroupGlobalOps
 
 //===----------------------------------------------------------------------===//
+// Constant folding ops
+//===----------------------------------------------------------------------===//
+
+def OpGroupConstantFoldingOps : OpDocGroup {
+  let summary = "Ops for representing constant folding intermediates";
+  let description = [{
+    Ops for managing constant folding.
+  }];
+}
+
+let opDocGroup = OpGroupConstantFoldingOps in {
+
+def Util_ConstExprOp : Util_PureOp<"constexpr", [
+    IsolatedFromAbove,
+    SingleBlock,
+]> {
+  let summary = "Represents a set of operations that can be considered to yield a constant";
+  let description = [{
+    Contains ops which compute a value that should be considered a constant.
+
+    Each `constexpr` result which survives lowering will be treated as an
+    immutable global in the final program, initialized by a module 
+    initializer. Typically, further optimizations will be made which eagerly
+    evaluate these initializers at compilation time.
+
+    The op is IsolatedFromAbove requiring explicit capture because it needs
+    to enforce the invariant that all producers are either contained in the
+    region or derived from constants.
+
+    The verifier asserts that all operands are themselves constexpr, although
+    this can be transitorilly untrue during transformations.
+  }];
+  let regions = (region SizedRegion<1>:$bodyRegion);
+  let arguments = (ins
+    Variadic<AnyType>:$operands
+  );
+  let results = (outs
+    Variadic<AnyType>:$results
+  );
+
+  let assemblyFormat = "operands attr-dict `:` functional-type(operands, results) regions";
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    Block* getBody() { return &getBodyRegion().front(); }
+  }];
+}
+
+def Util_YieldConstOp : Util_PureOp<"yield_const", [
+  Terminator,
+]> {
+  let summary = "Terminates a constexpr body";
+  let arguments = (ins
+    Variadic<AnyType>:$operands
+  );
+
+  let builders = [OpBuilder<(ins), [{
+    build($_builder, $_state, std::nullopt);
+  }]>];
+
+  let assemblyFormat = "operands `:` type(operands) attr-dict";
+}
+
+} // OpGroupConstantFoldingOps
+
+//===----------------------------------------------------------------------===//
 // !util.list<T>
 //===----------------------------------------------------------------------===//
 // NOTE: this type is mostly just a placeholder. Ideally we'd make this

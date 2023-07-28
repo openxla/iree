@@ -21,6 +21,7 @@ std::unique_ptr<OperationPass<mlir::ModuleOp>> createCombineInitializersPass();
 std::unique_ptr<OperationPass<void>> createDropCompilerHintsPass();
 std::unique_ptr<OperationPass<void>>
 createFixedPointIteratorPass(OpPassManager pipeline);
+std::unique_ptr<OperationPass<mlir::ModuleOp>> createConstExprToGlobalsPass();
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createFoldGlobalsPass();
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createFuseGlobalsPass();
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createHoistIntoGlobalsPass();
@@ -40,6 +41,7 @@ std::unique_ptr<OperationPass<mlir::ModuleOp>> createPromoteBF16ToF32Pass();
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createAnnotateOpOrdinalsPass();
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createTestConversionPass();
 std::unique_ptr<OperationPass<void>> createTestFloatRangeAnalysisPass();
+std::unique_ptr<OperationPass<void>> createTestTrivialConstExprFoldingPass();
 
 // Register all Passes
 void registerTransformPasses();
