@@ -38,7 +38,7 @@ class DescriptorSetArena final {
       VkCommandBuffer command_buffer,
       iree_hal_pipeline_layout_t* pipeline_layout, uint32_t set,
       iree_host_size_t binding_count,
-      const iree_hal_descriptor_set_binding_t* bindings);
+      const iree_hal_buffer_ref_t* bindings);
 
   // Flushes all pending writes to descriptor sets allocated from the arena and
   // returns a group that - when dropped - will release the descriptor sets
@@ -52,7 +52,7 @@ class DescriptorSetArena final {
   void PushDescriptorSet(VkCommandBuffer command_buffer,
                          iree_hal_pipeline_layout_t* pipeline_layout,
                          uint32_t set, iree_host_size_t binding_count,
-                         const iree_hal_descriptor_set_binding_t* bindings);
+                         const iree_hal_buffer_ref_t* bindings);
 
   VkDeviceHandle* logical_device_;
   DescriptorPoolCache* descriptor_pool_cache_;
