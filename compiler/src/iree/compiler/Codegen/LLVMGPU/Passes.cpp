@@ -564,11 +564,15 @@ extern llvm::cl::opt<std::string> clGPUCodegenTransformDialectFileName;
 extern llvm::cl::opt<std::string> clGPUCodegenTransformDialectDebugPayloadTag;
 extern llvm::cl::opt<std::string> clGPUCodegenTransformDialectDebugTransformTag;
 
-void addGPUTransformDialectPasses(OpPassManager &passManager) {
+void addGPUTransformDialectPasses(OpPassManager &passManager,
+                                  StringAttr codegenSpecFileName) {
   // Give control to the transform dialect.
+  StringRef fileName = codegenSpecFileName == StringAttr()
+                           ? clGPUCodegenTransformDialectFileName
+                           : codegenSpecFileName.getValue();
   passManager.addPass(
       mlir::iree_compiler::createTransformDialectInterpreterPass(
-          clGPUCodegenTransformDialectFileName,
+          fileName, /*transformLibraryFileName=*/StringRef(),
           clGPUCodegenTransformDialectDebugPayloadTag,
           clGPUCodegenTransformDialectDebugTransformTag));
 

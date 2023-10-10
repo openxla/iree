@@ -47,6 +47,12 @@
 
 using namespace mlir;
 
+static llvm::cl::opt<std::string> clTransformLibraryFileName(
+    "iree-codegen-transform-library-file-name", llvm::cl::init(""),
+    llvm::cl::desc(
+        "Optional name of the file containing transform dialect symbol "
+        "definitions to be injected into the transform module."));
+
 namespace {
 
 /// Pass declaration.
@@ -113,11 +119,18 @@ public:
 
   TransformDialectInterpreterPass(
       StringRef transformFileName = StringRef(),
+      StringRef transformLibraryFileName = StringRef(),
       StringRef debugPayloadRootTag = StringRef(),
       StringRef debugTransformRootTag = StringRef()) {
     this->transformFileName = transformFileName.str();
+    this->transformLibraryFileName = clTransformLibraryFileName.empty()
+                                         ? transformLibraryFileName.str()
+                                         : clTransformLibraryFileName;
     this->debugPayloadRootTag = debugPayloadRootTag.str();
     this->debugTransformRootTag = debugTransformRootTag.str();
+    // Disable expensive checks until
+    // https://github.com/llvm/llvm-project/pull/67437 gets merged.
+    this->options.enableExpensiveChecks(false);
   }
   TransformDialectInterpreterPass(const TransformDialectInterpreterPass &pass) =
       default;
@@ -129,10 +142,12 @@ namespace iree_compiler {
 /// Create a Transform dialect interpreter pass.
 std::unique_ptr<Pass>
 createTransformDialectInterpreterPass(llvm::StringRef transformFileName,
+                                      llvm::StringRef transformLibraryFileName,
                                       llvm::StringRef debugPayloadRootTag,
                                       llvm::StringRef debugTransformRootTag) {
   return std::make_unique<TransformDialectInterpreterPass>(
-      transformFileName, debugPayloadRootTag, debugTransformRootTag);
+      transformFileName, transformLibraryFileName, debugPayloadRootTag,
+      debugTransformRootTag);
 }
 } // namespace iree_compiler
 } // namespace mlir
