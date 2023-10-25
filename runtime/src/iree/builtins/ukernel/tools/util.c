@@ -6,6 +6,7 @@
 
 #include "iree/builtins/ukernel/tools/util.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +48,18 @@ bool iree_uk_2d_buffers_equal(const void* buf1, const void* buf2,
     if (memcmp(buf1_ptr, buf2_ptr, elem_size * size1)) return false;
     buf1_ptr += elem_size * stride0;
     buf2_ptr += elem_size * stride0;
+  }
+  return true;
+}
+
+bool iree_uk_buffers_equal_f32(const float* buf1, const float* buf2,
+                               iree_uk_index_t size, float relative_error) {
+  int i;
+
+  for (i = 0; i < size; i++) {
+    if (fabs(buf1[i] - buf2[i]) > relative_error) {
+      return false;
+    }
   }
   return true;
 }

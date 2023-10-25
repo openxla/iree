@@ -467,6 +467,53 @@ matchDAGForUKernel(RewriterBase &rewriter, IREE::Codegen::QueryTileSizesOp op,
       genericMicroKernelOp.getOperation());
 }
 
+static FailureOr<IREE::Codegen::UKernelOpInterface> matchDAGForUKernel(
+    RewriterBase &rewriter, linalg::SoftmaxOp op,
+    bool /*skipIntermediateRoundings*/) {
+  Location loc = op.getLoc();
+  auto input = op.getInput();
+  auto output = op.getOutput();
+  auto outputType = op.getInputOperandType();
+  auto outputElemType = outputType.getElementType();
+  uint64_t dim = op.getDimension();
+  uint64_t output_rank = op.getOutputOperandRank();
+  ArrayRef<int64_t> shapes = outputType.getShape();
+  uint64_t last_dim = shapes[output_rank - 1];
+  uint64_t flattened_dim = 1;
+  uint32_t flags = 0;
+
+  if (!outputElemType.isF32()) {
+    return rewriter.notifyMatchFailure(
+        op, "unsupported softmax data type for ukernel");
+  }
+  flags |= IREE_UK_FLAG_SOFTMAX_TYPE_F32;
+
+  for (int d = 0; d < output_rank - 1; d++) {
+    flattened_dim *= shapes[d];
+  }
+
+  if (dim != output_rank - 1) {
+    return rewriter.notifyMatchFailure(op,
+                                       "unsupported softmax dim for ukernel");
+  }
+
+  Value m = rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getI32IntegerAttr(flattened_dim));
+  Value n = rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getI32IntegerAttr(last_dim));
+  Value flagsVal = rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getI32IntegerAttr(flags));
+
+  auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(op);
+  auto fn = getFnNameAndDefAttrs("softmax", rewriter, targetAttr);
+
+  auto genericMicroKernelOp = rewriter.create<IREE::Codegen::UKernelGenericOp>(
+      loc, outputType, fn.name, input, output, ValueRange{m, n, flagsVal},
+      rewriter.getDictionaryAttr(fn.defAttrs), rewriter.getIndexAttr(1));
+
+  return cast<IREE::Codegen::UKernelOpInterface>(
+      genericMicroKernelOp.getOperation());
+}
 namespace {
 
 using TargetPredicate = std::function<bool(IREE::HAL::ExecutableTargetAttr)>;
@@ -533,6 +580,8 @@ void LLVMCPULowerToUKernelsPass::runOnOperation() {
   // These patterns are inherently specific to the VMVX backend.
   patterns.insert<LowerToUKernelPattern<IREE::Codegen::QueryTileSizesOp>>(
       context, isVMVXBackend);
+  // These patterns are used on LLVMCPU and VMVX. Only for riscv target.
+  patterns.insert<LowerToUKernelPattern<linalg::SoftmaxOp>>(context, isRISCV);
   if (failed(
           applyPatternsAndFoldGreedily(getOperation(), std::move(patterns)))) {
     return signalPassFailure();
