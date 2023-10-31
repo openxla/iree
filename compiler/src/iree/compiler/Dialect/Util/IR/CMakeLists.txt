@@ -32,6 +32,7 @@ iree_cc_library(
   NAME
     IR
   HDRS
+    "CASResources.h"
     "ClosureOpUtils.h"
     "UtilDialect.h"
     "UtilOps.h"
@@ -51,6 +52,7 @@ iree_cc_library(
     "UtilTypes.cpp.inc"
     "UtilTypes.h.inc"
   SRCS
+    "CASResources.cpp"
     "ClosureOpUtils.cpp"
     "UtilAttrs.cpp"
     "UtilDialect.cpp"

@@ -21,6 +21,7 @@ iree_cc_library(
     "AnnotateOpOrdinals.cpp"
     "ApplyPatterns.cpp"
     "CombineInitializers.cpp"
+    "ConvertElements.cpp"
     "ConvertPrimitiveType.cpp"
     "DropCompilerHints.cpp"
     "FixedPointIterator.cpp"
@@ -28,7 +29,6 @@ iree_cc_library(
     "FuseGlobals.cpp"
     "HoistIntoGlobals.cpp"
     "IPO.cpp"
-    "ImportResources.cpp"
     "OutlineConstants.cpp"
     "PassDetail.h"
     "Passes.cpp"
@@ -37,6 +37,7 @@ iree_cc_library(
     "SimplifyGlobalAccesses.cpp"
     "StripAndSplatConstants.cpp"
     "StripDebugOps.cpp"
+    "TestCASResources.cpp"
     "TestConversion.cpp"
     "TestFloatRangeAnalysis.cpp"
   DEPS

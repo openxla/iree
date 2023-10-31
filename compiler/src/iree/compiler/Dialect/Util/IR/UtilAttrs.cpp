@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/compiler/Dialect/Util/IR/CASResources.h"
 #include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
 #include "iree/compiler/Dialect/Util/IR/UtilTypes.h"
 #include "llvm/ADT/BitVector.h"
@@ -20,6 +21,8 @@
 #include "mlir/IR/TypeSupport.h"
 #include "mlir/Interfaces/CastInterfaces.h"
 #include "mlir/Parser/Parser.h"
+
+#include <atomic>
 
 // clang-format off: must be included after all LLVM/MLIR headers.
 #define GET_ATTRDEF_CLASSES
@@ -793,6 +796,178 @@ struct SerializableStringAttrModel
 };
 
 //===----------------------------------------------------------------------===//
+// CASScope
+//===----------------------------------------------------------------------===//
+
+namespace {
+int64_t getUniqueCASScopeIndex() {
+  static std::atomic<int64_t> index;
+  return index.fetch_add(1);
+}
+} // namespace
+
+CASScopeAttr CASScopeAttr::get(MLIRContext *context) {
+  return Base::get(context, getUniqueCASScopeIndex());
+}
+
+Attribute CASScopeAttr::parse(AsmParser &parser, Type type) {
+  return CASScopeAttr::get(parser.getContext());
+}
+
+void CASScopeAttr::print(AsmPrinter &p) const {}
+
+CASScopeAttr CASScopeAttr::findOrCreateRootScope(Operation *op) {
+  Operation *lastOp = op;
+  while (op) {
+    lastOp = op;
+    auto scope = op->getAttrOfType<CASScopeAttr>("util.cas-scope");
+    if (scope)
+      return scope;
+    op = op->getParentOp();
+  }
+
+  // Not found.
+  auto newScope = CASScopeAttr::get(lastOp->getContext());
+  lastOp->setAttr("util.cas-scope", newScope);
+  return newScope;
+}
+
+//===----------------------------------------------------------------------===//
+// #util.elements
+//===----------------------------------------------------------------------===//
+
+CASElementsAttr CASElementsAttr::get(ShapedType type,
+                                     UtilDialect::CASResourceHandle handle) {
+  return Base::get(type.getContext(), type, handle);
+}
+
+Attribute CASElementsAttr::parse(AsmParser &parser, Type type) {
+  if (parser.parseLess())
+    return nullptr;
+
+  // Parse the resource handle.
+  FailureOr<UtilDialect::CASResourceHandle> maybeHandle =
+      parser.parseResourceHandle<UtilDialect::CASResourceHandle>();
+  if (failed(maybeHandle) || parser.parseGreater())
+    return nullptr;
+
+  // Parse the type of the attribute if the user didn't provide one.
+  if (!type) {
+    if (parser.parseColon() || parser.parseType(type))
+      return nullptr;
+  }
+
+  ShapedType shapedType = llvm::dyn_cast<ShapedType>(type);
+  if (!shapedType) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "`dense_resource` expected a shaped type"),
+           nullptr;
+  }
+
+  return CASElementsAttr::get(shapedType, *maybeHandle);
+}
+
+void CASElementsAttr::print(AsmPrinter &p) const {
+  auto &os = p.getStream();
+  os << "<";
+  p.printResourceHandle(getHandle());
+  os << ">";
+}
+
+std::optional<CASResourceReader>
+CASElementsAttr::getResourceData(Location loc) const {
+  auto handle = getHandle();
+  auto *resource = handle.getResource();
+  if (!resource) {
+    emitError(loc) << "backing data for resource '" << handle.getKey()
+                   << "' is not defined";
+    return {};
+  }
+  AsmResourceBlob *blob = resource->getBlob();
+  if (!blob) {
+    emitError(loc) << "the resource '" << handle.getKey() << "' has no data";
+    return {};
+  }
+  CASResourceReader reader(blob->getData());
+  if (!reader.isValid()) {
+    emitError(loc) << "the resource '" << handle.getKey() << "' is corrupt";
+    return {};
+  }
+  if (reader.isDead()) {
+    emitError(loc) << "the resource '" << handle.getKey()
+                   << "' has been deleted";
+    return {};
+  }
+  return reader;
+}
+
+std::optional<CASResourceReader>
+CASElementsAttr::getOptionalResourceData() const {
+  auto handle = getHandle();
+  auto *resource = handle.getResource();
+  if (!resource)
+    return {};
+  AsmResourceBlob *blob = resource->getBlob();
+  if (!blob)
+    return {};
+  CASResourceReader reader(blob->getData());
+  if (!reader.isValid())
+    return {};
+  if (reader.isDead())
+    return {};
+  return reader;
+}
+
+int64_t CASElementsAttr::getStorageSize() const {
+  auto reader = getOptionalResourceData();
+  if (reader) {
+    return reader->getData().size();
+  }
+  return 0;
+}
+
+LogicalResult
+CASElementsAttr::serializeToBuffer(Location loc,
+                                   llvm::support::endianness endian,
+                                   ArrayRef<char> buffer) const {
+  auto reader = getResourceData(loc);
+  if (!reader)
+    return failure();
+  assert(buffer.size() == reader->getData().size() &&
+         "CASElementsAttr serializeToBuffer should be same size");
+  buffer = reader->getData();
+  return success();
+}
+
+LogicalResult
+CASElementsAttr::serializeToStream(Location loc,
+                                   llvm::support::endianness endian,
+                                   llvm::raw_ostream &os) const {
+  auto reader = getResourceData(loc);
+  if (!reader)
+    return failure();
+  os.write(reader->getData().data(), reader->getData().size());
+  return success();
+}
+
+// //===----------------------------------------------------------------------===//
+// // ImportableElementsAttr implementations
+// //===----------------------------------------------------------------------===//
+
+// struct ImportableElementsAttrModel
+//     : public
+//     ImportableElementsAttr::ExternalModel<ImportableElementsAttrModel,
+//                                                    DenseIntOrFPElementsAttr>
+//                                                    {
+//   ElementsAttr getElements(Attribute baseAttr) const {
+//     return llvm::cast<ElementsAttr>(baseAttr);
+//   }
+//   TypedAttr reshape(Attribute baseAttr, ShapedType newType) const {
+//     return llvm::cast<DenseElementsAttr>(baseAttr).reshape(newType);
+//   }
+// };
+
+//===----------------------------------------------------------------------===//
 // IREE::Util::UtilDialect
 //===----------------------------------------------------------------------===//
 
@@ -813,6 +988,12 @@ void UtilDialect::registerAttributes() {
   // up in the stack - things that end up here are generally already in a target
   // encoding.
   auto &context = *getContext();
+
+  // ManagedElements implementations.
+  // DenseIntElementsAttr::attachInterface<ImportableElementsAttrModel>(context);
+  // DenseFPElementsAttr::attachInterface<ImportableElementsAttrModel>(context);
+
+  // Serializable implementations.
   DenseIntElementsAttr::attachInterface<SerializableDenseElementsAttrModel>(
       context);
   DenseFPElementsAttr::attachInterface<SerializableDenseElementsAttrModel>(

@@ -34,7 +34,7 @@ createStripAndSplatConstantsPass();
 std::unique_ptr<OperationPass<void>> createStripDebugOpsPass();
 
 // Resource Management.
-std::unique_ptr<OperationPass<void>> createImportResourcesPass();
+std::unique_ptr<OperationPass<void>> createConvertElementsPass();
 
 // Type conversion.
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createDemoteI64ToI32Pass();
@@ -45,6 +45,7 @@ std::unique_ptr<OperationPass<mlir::ModuleOp>> createPromoteBF16ToF32Pass();
 
 // Debug/test passes.
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createAnnotateOpOrdinalsPass();
+std::unique_ptr<OperationPass<void>> createTestCASResourcesPass();
 std::unique_ptr<OperationPass<mlir::ModuleOp>> createTestConversionPass();
 std::unique_ptr<OperationPass<void>> createTestFloatRangeAnalysisPass();
 
