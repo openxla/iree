@@ -510,6 +510,11 @@ isFusableWithConsumer(OpOperand &fusedOperand,
     return false;
   }
 
+  // Always fuse dequant to consumer since it's not very useful by itself.
+  if (isGroupedDequantizationOp(producer)) {
+    return true;
+  }
+
   if (isPackLikeOp(consumer)) {
     return isa<linalg::LinalgOp, tensor::PadOp>(producer);
   }
@@ -650,6 +655,11 @@ isFusableWithProducer(OpOperand &operand,
 
   if (!isa<linalg::LinalgOp>(consumer) || !isa<linalg::LinalgOp>(producer)) {
     return false;
+  }
+
+  // Always fuse dequant to consumer since it's not very useful by itself.
+  if (isGroupedDequantizationOp(producer)) {
+    return true;
   }
 
   auto consumerLinalgOp = cast<linalg::LinalgOp>(consumer);
