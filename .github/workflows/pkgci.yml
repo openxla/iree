@@ -44,3 +44,8 @@ jobs:
     name: Regression Test AMDGPU-ROCm
     uses: ./.github/workflows/pkgci_regression_test_amdgpu_rocm.yml
     needs: [build_packages]
+
+  regression_test_a100:
+    name: Regression Test A100
+    uses: ./.github/workflows/pkgci_regression_test_a100.yml
+    needs: [build_packages]
