@@ -169,7 +169,6 @@ bool hasUkernel(IREE::HAL::ExecutableTargetAttr targetAttr,
     return true;
   }
   // If `ukernelName` is empty, the question is "are ukernels enabled at all?"
-  // At this point, we already know that enabledUkernelsStr != "none".
   if (ukernelName.empty()) {
     return !enabledUkernelsStr.empty();
   }
