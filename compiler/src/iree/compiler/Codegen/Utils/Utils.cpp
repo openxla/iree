@@ -158,7 +158,7 @@ bool hasUkernel(IREE::HAL::ExecutableTargetAttr targetAttr,
   // Resolve `default`.
   if (enabledUkernelsStr == "default") {
     // Current defaults implemented here. Could depend on targetAttr.
-    enabledUkernelsStr = "none";
+    enabledUkernelsStr = "mmt4d";
   }
   // Resolve `none`.
   if (enabledUkernelsStr == "none") {
