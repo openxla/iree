@@ -158,7 +158,7 @@ bool hasUkernel(IREE::HAL::ExecutableTargetAttr targetAttr,
   // Resolve `default`.
   if (enabledUkernelsStr == "default") {
     // Current defaults implemented here. Could depend on targetAttr.
-    enabledUkernelsStr = "none";
+    enabledUkernelsStr = "mmt4d";
   }
   // Resolve `none`.
   if (enabledUkernelsStr == "none") {
@@ -169,7 +169,6 @@ bool hasUkernel(IREE::HAL::ExecutableTargetAttr targetAttr,
     return true;
   }
   // If `ukernelName` is empty, the question is "are ukernels enabled at all?"
-  // At this point, we already know that enabledUkernelsStr != "none".
   if (ukernelName.empty()) {
     return !enabledUkernelsStr.empty();
   }

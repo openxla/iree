@@ -61,6 +61,19 @@ func.func @mmt4d_f32f32f32_with_only_mmt4d_ukernel_enabled(%arg0 : tensor<?x?x?x
 
 // -----
 
+func.func @mmt4d_f32f32f32_with_default_ukernels_enabled(%arg0 : tensor<?x?x?x?xf32>, %arg1 : tensor<?x?x?x?xf32>,
+    %arg2 : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32> attributes {
+  hal.executable.target = #hal.executable.target<"llvm-cpu", "xyz", {ukernels = "default"}>
+} {
+  %0 = linalg.mmt4d ins(%arg0, %arg1 : tensor<?x?x?x?xf32>, tensor<?x?x?x?xf32>)
+      outs(%arg2 : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32>
+  return %0 : tensor<?x?x?x?xf32>
+}
+//      CHECK: func @mmt4d_f32f32f32_with_default_ukernels_enabled(
+//      CHECK:   iree_codegen.ukernel.generic "iree_uk_mmt4d"
+
+// -----
+
 func.func @mmt4d_f32f32f32_with_only_foo_mmt4d_bar_ukernel_enabled(%arg0 : tensor<?x?x?x?xf32>, %arg1 : tensor<?x?x?x?xf32>,
     %arg2 : tensor<?x?x?x?xf32>) -> tensor<?x?x?x?xf32> attributes {
   hal.executable.target = #hal.executable.target<"llvm-cpu", "xyz", {ukernels = "foo,mmt4d,bar"}>
