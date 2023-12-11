@@ -253,9 +253,8 @@ iree_py_test(
     "tests/system_setup_test.py"
 )
 
-# These tests perform linking via the Compiler API, which is only supported
-# in bundled-LLVM builds at the moment (#14086).
-if(IREE_BUILD_BUNDLED_LLVM)
+# These tests use compiler APIs as well as runtime APIs.
+if(IREE_BUILD_COMPILER)
   iree_py_test(
     NAME
       benchmark_test
