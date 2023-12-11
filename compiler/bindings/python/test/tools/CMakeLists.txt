@@ -4,16 +4,15 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# These tests perform linking via the Compiler API, which is only supported
-# in bundled-LLVM builds at the moment (#14086).
-if(IREE_BUILD_BUNDLED_LLVM)
+# These tests use compiler APIs as well as runtime APIs.
+if(IREE_BUILD_COMPILER)
 iree_py_test(
   NAME
     compiler_core_test
   SRCS
     "compiler_core_test.py"
 )
-endif()  # IREE_BUILD_BUNDLED_LLVM
+endif()
 
 iree_py_test(
   NAME
@@ -35,4 +34,3 @@ iree_py_test(
   SRCS
     "compiler_tflite_test.py"
 )
-
