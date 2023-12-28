@@ -26,11 +26,24 @@ typedef struct iree_hal_vulkan_debug_reporter_t
 
 iree_status_t iree_hal_vulkan_debug_reporter_allocate(
     VkInstance instance, iree::hal::vulkan::DynamicSymbols* syms,
-    int32_t min_verbosity, const VkAllocationCallbacks* allocation_callbacks,
+    int32_t min_verbosity, bool check_errors,
+    const VkAllocationCallbacks* allocation_callbacks,
     iree_allocator_t host_allocator,
     iree_hal_vulkan_debug_reporter_t** out_reporter);
 
 void iree_hal_vulkan_debug_reporter_free(
+    iree_hal_vulkan_debug_reporter_t* reporter);
+
+// Returns true if the reporter encountered an error.
+// iree_hal_vulkan_debug_reporter_consume_status can be used once to get the
+// full status describing the failure and subsequent calls will return the
+// status code.
+bool iree_hal_vulkan_debug_reporter_has_error(
+    iree_hal_vulkan_debug_reporter_t* reporter);
+
+// Returns the error to the caller (transfering ownership).
+// The reporter will remain in a failed state with the status code.
+iree_status_t iree_hal_vulkan_debug_reporter_consume_status(
     iree_hal_vulkan_debug_reporter_t* reporter);
 
 #endif  // IREE_HAL_DRIVERS_VULKAN_DEBUG_REPORTER_H_
