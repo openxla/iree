@@ -940,7 +940,8 @@ static void setAnchorOpsFromAttributes(VectorLayoutAnalysis &analysis,
             .getAsInteger(/*Radix=*/10, operandNum);
         assert(operandNum < op->getNumOperands() &&
                "operand number out of range");
-        analysis.setAnchor(op->getOperand(operandNum), attr.getValue());
+        analysis.setAnchorForOperand(op->getOpOperand(operandNum),
+                                     attr.getValue());
       }
       if (name.find("__vector_layout_test_anchor_result_") !=
           std::string::npos) {
@@ -948,7 +949,8 @@ static void setAnchorOpsFromAttributes(VectorLayoutAnalysis &analysis,
         name.substr(name.find_last_of("_") + 1)
             .getAsInteger(/*Radix=*/10, resultNum);
         assert(resultNum < op->getNumResults() && "result number out of range");
-        analysis.setAnchor(op->getResult(resultNum), attr.getValue());
+        auto resVal = cast<TypedValue<VectorType>>(op->getResult(resultNum));
+        analysis.setAnchorForResult(resVal, attr.getValue());
       }
     }
   });
@@ -963,7 +965,11 @@ static void emitLayoutRemarks(VectorLayoutAnalysis &analysis,
     }
 
     for (OpResult result : op->getOpResults()) {
-      if (auto layout = analysis.getLayout<Attribute>(result)) {
+      auto resVal = dyn_cast<TypedValue<VectorType>>(result);
+      if (!resVal)
+        continue;
+
+      if (auto layout = analysis.getLayout<Attribute>(resVal)) {
         // Print layout attr to a string.
         std::string layoutStr;
         llvm::raw_string_ostream s(layoutStr);
@@ -983,10 +989,6 @@ transform_dialect::TestVectorLayoutAnalysisOp::applyToOne(
     transform::TransformState &state) {
   VectorLayoutAnalysis analysis(target);
   setAnchorOpsFromAttributes(analysis, target);
-  if (failed(analysis.run())) {
-    target.emitError("layout analysis failed");
-    return emitDefaultSilenceableFailure(target);
-  }
   emitLayoutRemarks(analysis, target);
   return DiagnosedSilenceableFailure::success();
 }
