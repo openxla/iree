@@ -9,12 +9,6 @@
 load("//build_tools/bazel:iree_bytecode_module.bzl", "iree_bytecode_module")
 load("//build_tools/bazel:native_binary.bzl", "native_test")
 
-ALL_TARGET_BACKENDS_AND_DRIVERS = [
-    ("vmvx", "local-task"),
-    ("vulkan-spirv", "vulkan"),
-    ("llvm-cpu", "local-task"),
-]
-
 def iree_check_test(
         name,
         src,
@@ -129,6 +123,14 @@ def iree_check_single_backend_test_suite(
     if target_cpu_features:
         fail("target_cpu_features must currently be empty")
 
+    if target_backend == "cuda" or driver == "cuda":
+        # TODO(#15233): add filtering based on @iree_cuda//:enabled for cuda
+        pass
+
+    if target_backend == "webgpu" or target_backend == "metal-spirv":
+        # These are only supported in the CMake build for now.
+        return
+
     tests = []
     for src in srcs:
         test_name = "_".join([name, src])
@@ -162,7 +164,7 @@ def iree_check_single_backend_test_suite(
 def iree_check_test_suite(
         name,
         srcs,
-        target_backends_and_drivers = ALL_TARGET_BACKENDS_AND_DRIVERS,
+        target_backends_and_drivers = [],
         compiler_flags = [],
         runner_args = [],
         tags = [],
@@ -175,8 +177,9 @@ def iree_check_test_suite(
     Args:
       name: name of the generated test suite.
       srcs: source mlir files containing the module.
-      target_backends_and_drivers: backend/driver pairs to compile and run the
-          module, respectively.
+      target_backends_and_drivers: list of ("backend", "driver") tuples to
+          compile and run the module, respectively. If "driver" is omitted then
+          only compilation will be tested.
       compiler_flags: additional flags to pass to the compiler. Bytecode output
           format and backend flags are passed automatically.
       runner_args: additional runner_args to pass to the underlying
@@ -205,9 +208,6 @@ def iree_check_test_suite(
     # could just create a test suite. The latter seems simpler and more readable.
     tests = []
     for backend, driver in target_backends_and_drivers:
-        # CUDA backend/driver not supported by Bazel build.
-        if backend == "cuda" or driver == "cuda":
-            continue
         suite_name = "_".join([name, backend, driver])
         iree_check_single_backend_test_suite(
             name = suite_name,
