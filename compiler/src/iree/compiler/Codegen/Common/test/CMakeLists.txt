@@ -58,11 +58,13 @@ iree_lit_test_suite(
     "test_partitionable_loops_interface.mlir"
     "tile_and_distribute_to_workgroups.mlir"
     "transform_buffer_opt.mlir"
+    "transform_fold_arith_extf_into_vector_contract.mlir"
     "transform_match_partial_reduction.mlir"
     "transform_ops_invalid.mlir"
     "transpose_canonicalization.mlir"
     "type_propagation.mlir"
     "type_propagation_packing.mlir"
+    "vector_layout_analysis.mlir"
     "vectorize_tensor_pad.mlir"
     "workgroup_specialization.mlir"
   TOOLS
