@@ -65,7 +65,7 @@ rm -rf ./shark_tmp
 rm -rf ~/.local/shark_tank
 
 declare -a args=(
-  --benchmark
+  --benchmark="all"
   --update_tank
   --maxfail=500
   -k "${BENCHMARK_REGEX}"
@@ -76,7 +76,7 @@ if [[ ${DRIVER} == "cuda" ]]; then
 fi
 
 # Run with SHARK-Runtime.
-PYTHON=python3.11 VENV_DIR=shark.venv BENCHMARK=1 IMPORTER=1 ./setup_venv.sh
+PYTHON=python3.11 VENV_DIR=shark.venv IMPORTER=1 ./setup_venv.sh
 source shark.venv/bin/activate
 
 export SHARK_VERSION=`pip show iree-compiler | grep Version | sed -e "s/^Version: \(.*\)$/\1/g"`
@@ -94,7 +94,7 @@ rm -rf ./shark_tmp
 rm -rf ~/.local/shark_tank
 
 # Run with IREE.
-PYTHON=python3.11 VENV_DIR=iree.venv BENCHMARK=1 IMPORTER=1 USE_IREE=1 ./setup_venv.sh
+PYTHON=python3.11 VENV_DIR=iree.venv USE_IREE=1 ./setup_venv.sh
 source iree.venv/bin/activate
 
 export IREE_VERSION=$(pip show iree-compiler | grep Version | sed -e "s/^Version: \(.*\)$/\1/g")
@@ -111,24 +111,8 @@ if [[ ! -z "${IREE_SOURCE_DIR}" ]]; then
   export IREE_VERSION="sha_$(git rev-parse --short=10 HEAD)"
 
   # We build using the same Python Virtual Environment as SHARK to ensure compatibility.
-  cmake -GNinja -B iree-build -S . \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-      -DIREE_ENABLE_ASSERTIONS=ON \
-      -DCMAKE_C_COMPILER=clang \
-      -DCMAKE_CXX_COMPILER=clang++ \
-      -DIREE_ENABLE_LLD=ON \
-      -DIREE_BUILD_PYTHON_BINDINGS=ON \
-      -DPython3_EXECUTABLE="$(which python)" \
-      -DIREE_HAL_DRIVER_CUDA=ON \
-      -DIREE_TARGET_BACKEND_CUDA=ON
-
-  cmake --build iree-build
-
-  # Install Python bindings.
-  pushd iree-build
   pip install -e compiler/
   pip install -e runtime/
-  popd # iree-build
   popd # ${IREE_SOURCE_DIR}
 fi
 
