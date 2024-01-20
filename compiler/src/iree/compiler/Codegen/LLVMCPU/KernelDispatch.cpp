@@ -283,17 +283,31 @@ static int64_t getVectorSize(func::FuncOp entryPointFn, ShapedType shapedType) {
   return getVectorSize(entryPointFn, byteWidth);
 }
 
+/// Returns the nearest power of two of `size` if `predicate` is true.
+/// Otherwise, returns `size`.
+static int64_t roundUpToPow2(int64_t size, bool predicate) {
+  if (!predicate) {
+    return size;
+  }
+  assert(size > 0 && "Negative size");
+  return llvm::PowerOf2Ceil(size);
+}
+
 /// Returns minimum tiling sizes for each dimension. One dimension is possible
 /// to access at different element types. It determines the tiling sizes by
 /// looking into all the operands.
-// TODO(diegocaballero): Refactor this logic to a method that computes the final
-// tile sizes for vectorization/unrolling in one shot.
 static SmallVector<int64_t>
-getMinTilingSizesForEachDim(func::FuncOp entryPointFn, linalg::LinalgOp op,
-                            const LinalgOpInfo &linalgOpInfo,
-                            const TargetMLTransformInfo &targetMLTransInfo) {
+getVectorSizesForEachDim(func::FuncOp entryPointFn, linalg::LinalgOp op,
+                         const LinalgOpInfo &linalgOpInfo,
+                         const TargetMLTransformInfo &targetMLTransInfo) {
   unsigned numLoops = op.getNumLoops();
   SmallVector<int64_t> minTileSizes(numLoops, 1);
+
+  // Early return for trivial case, i.e., it is just a scalar.
+  if (minTileSizes.empty()) {
+    return minTileSizes;
+  }
+
   auto inputOutputOpOperands = op->getOpOperands();
 
   for (auto [index, map] : llvm::enumerate(op.getIndexingMapsArray())) {
@@ -314,6 +328,12 @@ getMinTilingSizesForEachDim(func::FuncOp entryPointFn, linalg::LinalgOp op,
 
     minTileSizes[fastestVaryingDim] =
         std::max<int64_t>(minTileSizes[fastestVaryingDim], tileSize);
+  }
+
+  auto vecPreProcStrategy = getVectorPreProcStrategy(op);
+  for (auto &vecTileSize : minTileSizes) {
+    vecTileSize = roundUpToPow2(
+        vecTileSize, vecPreProcStrategy == VectorPreProcStrategy::Masking);
   }
 
   // Limit unroll factor. For now, we assume the rightmost non-one tiled
@@ -339,6 +359,14 @@ getMinTilingSizesForEachDim(func::FuncOp entryPointFn, linalg::LinalgOp op,
   } else {
     // Limit unrolling to the default target maximum.
     limitUnrollFactor(targetMLTransInfo.defaultMaxUnrollFactor);
+  }
+
+  // Limit innermost tile sizes to avoid large unroll factors. Most of the
+  // cases are f32 and i32, so we divide it by 4.
+  // TODO(hanchung): Consider to relax this when there are no mixed types.
+  if (!linalgOpInfo.isReduction()) {
+    int64_t vecSize = getNativeVectorSizeInBytes(entryPointFn) / 4;
+    minTileSizes.back() = std::min(minTileSizes.back(), vecSize);
   }
 
   return minTileSizes;
@@ -478,16 +506,6 @@ getDefaultDistributionTileSizes(ArrayRef<int64_t> lbs, ArrayRef<int64_t> ubs,
                                vectorSizeHints);
 
   return distributedTileSizes;
-}
-
-/// Returns the nearest power of two of `size` if `predicate` is true.
-/// Otherwise, returns `size`.
-static int64_t roundUpToPow2(int64_t size, bool predicate) {
-  if (!predicate) {
-    return size;
-  }
-  assert(size > 0 && "Negative size");
-  return llvm::PowerOf2Ceil(size);
 }
 
 /// Computes the maximum tile size that can be used to distribute a dimension
@@ -1475,30 +1493,6 @@ static LogicalResult setRootConfig(func::FuncOp entryPointFn,
       entryPointFn, fftOp, tileSizes, DispatchLoweringPassPipeline::CPUDefault);
 }
 
-static void setX86VectorTileSizes(linalg::GenericOp genericOp,
-                                  unsigned numLoops,
-                                  ArrayRef<int64_t> distTileSizes,
-                                  ArrayRef<int64_t> minTileSizes,
-                                  ArrayRef<int64_t> maxTileSizes,
-                                  VectorPreProcStrategy vecPreProcStrategy,
-                                  SmallVectorImpl<int64_t> &vecTileSizes) {
-  vecTileSizes.append(numLoops, 0);
-  SmallVector<int64_t> staticLoopRanges = genericOp.getStaticLoopRanges();
-  for (auto loopNum : llvm::seq<unsigned>(0, numLoops)) {
-    if (distTileSizes[loopNum]) {
-      vecTileSizes[loopNum] = getMaxVectorTileSize(
-          distTileSizes[loopNum], minTileSizes[loopNum], minTileSizes[loopNum],
-          /*enforcePowerOfTwo=*/vecPreProcStrategy ==
-              VectorPreProcStrategy::Masking);
-    } else {
-      // If the distribution tile size is zero, and static loop range is 0 as
-      // well, set the tile sizes here to zero as well.
-      vecTileSizes[loopNum] =
-          staticLoopRanges[loopNum] == 1 ? 0 : minTileSizes[loopNum];
-    }
-  }
-}
-
 /// Returns true if the operation is a GenericOp implementing a supported
 /// transposition.
 static bool isSupportedTransposeOp(linalg::GenericOp genericOp) {
@@ -1546,8 +1540,14 @@ setDefaultGenericOpRootConfig(func::FuncOp entryPointFn,
         DispatchLoweringPassPipeline::CPUDefault);
   }
 
+  auto vecPreProcStrategy = getVectorPreProcStrategy(genericOp);
+  LLVM_DEBUG(KD_DBGS() << "Vectorization pre-processing strategy "
+                       << vecPreProcStrategy << "\n");
+
   DistributionHeuristicConfig distConfig;
-  distConfig.minTileSizes = getMinTilingSizesForEachDim(
+  distConfig.allowIncompleteTile =
+      vecPreProcStrategy != VectorPreProcStrategy::None;
+  distConfig.minTileSizes = getVectorSizesForEachDim(
       entryPointFn, genericOp, linalgOpInfo, targetMLTransInfo);
   // For generic ops we'll use the default divided by 2 to control the stack
   // allocation limit See #9469 for example.
@@ -1559,16 +1559,9 @@ setDefaultGenericOpRootConfig(func::FuncOp entryPointFn,
   LLVM_DEBUG(KD_DBGS() << "Final tile sizes for distribution: " << distTileSizes
                        << "\n");
 
-  auto vecPreProcStrategy = getVectorPreProcStrategy(genericOp);
-  LLVM_DEBUG(KD_DBGS() << "Vectorization pre-processing strategy "
-                       << vecPreProcStrategy << "\n");
-
   // Set the next level tile sizes.
-  SmallVector<int64_t> parallelTileSizes;
+  SmallVector<int64_t> parallelTileSizes = distConfig.minTileSizes;
   SmallVector<int64_t> reductionTileSizes;
-  setX86VectorTileSizes(genericOp, numLoops, distTileSizes,
-                        distConfig.minTileSizes, distConfig.maxTileSizes,
-                        vecPreProcStrategy, parallelTileSizes);
   splitParallelAndReductionTiles(genericOp, parallelTileSizes,
                                  reductionTileSizes);
   setVectorSizesForDynamicShapes(genericOp, vecPreProcStrategy,
@@ -1584,17 +1577,10 @@ setDefaultGenericOpRootConfig(func::FuncOp entryPointFn,
   // No need for tiling inner parallel dims.
   tileSizes.emplace_back(numLoops, 0);
 
-  // For non-tensor based ops use the Buffer ops pipeline.
-  DispatchLoweringPassPipeline passPipeline;
-  if (genericOp.hasTensorSemantics()) {
-    passPipeline =
-        vecPreProcStrategy == VectorPreProcStrategy::Peeling
-            ? DispatchLoweringPassPipeline::CPUDoubleTilingPeelingExpert
-            : DispatchLoweringPassPipeline::CPUDoubleTilingExpert;
-  } else {
-    passPipeline = DispatchLoweringPassPipeline::CPUBufferOpsTileAndVectorize;
-  }
-
+  DispatchLoweringPassPipeline passPipeline =
+      vecPreProcStrategy == VectorPreProcStrategy::Peeling
+          ? DispatchLoweringPassPipeline::CPUDoubleTilingPeelingExpert
+          : DispatchLoweringPassPipeline::CPUDoubleTilingExpert;
   return setOpConfigAndEntryPointFnTranslation(entryPointFn, genericOp,
                                                tileSizes, passPipeline);
 }
@@ -1635,9 +1621,8 @@ setTransposeLikeOpRootConfig(func::FuncOp entryPointFn,
     return failure();
   }
 
-  unsigned numLoops = genericOp.getNumLoops();
   DistributionHeuristicConfig distConfig;
-  distConfig.minTileSizes = getMinTilingSizesForEachDim(
+  distConfig.minTileSizes = getVectorSizesForEachDim(
       entryPointFn, genericOp, linalgOpInfo, targetMLTransInfo);
   if (llvm::all_of(distConfig.minTileSizes,
                    [](int64_t vs) { return vs == 1; })) {
@@ -1669,15 +1654,11 @@ setTransposeLikeOpRootConfig(func::FuncOp entryPointFn,
   SmallVector<int64_t> distTileSizes =
       getDefaultDistributedLevelTileSizes(genericOp, distConfig);
 
-  auto vecPreProcStrategy = getVectorPreProcStrategy(genericOp);
   LLVM_DEBUG(KD_DBGS() << "Vectorization pre-processing strategy "
-                       << vecPreProcStrategy << "\n");
+                       << getVectorPreProcStrategy(genericOp) << "\n");
 
   // Set the next level tile sizes.
-  SmallVector<int64_t> parallelTileSizes;
-  setX86VectorTileSizes(genericOp, numLoops, distTileSizes,
-                        distConfig.minTileSizes, distConfig.maxTileSizes,
-                        vecPreProcStrategy, parallelTileSizes);
+  SmallVector<int64_t> parallelTileSizes = distConfig.minTileSizes;
 
   TileSizesListType tileSizes = {distTileSizes, parallelTileSizes};
   // No need for tiling reduction dims and inner parallel dims.
@@ -1685,13 +1666,9 @@ setTransposeLikeOpRootConfig(func::FuncOp entryPointFn,
   tileSizes.emplace_back(numTilingDims, 0);
   tileSizes.emplace_back(numTilingDims, 0);
 
-  // For non-tensor based ops use the Buffer ops pipeline.
-  auto passPipeline =
-      genericOp.hasTensorSemantics()
-          ? DispatchLoweringPassPipeline::CPUDoubleTilingExpert
-          : DispatchLoweringPassPipeline::CPUBufferOpsTileAndVectorize;
-  return setOpConfigAndEntryPointFnTranslation(entryPointFn, genericOp,
-                                               tileSizes, passPipeline);
+  return setOpConfigAndEntryPointFnTranslation(
+      entryPointFn, genericOp, tileSizes,
+      DispatchLoweringPassPipeline::CPUDoubleTilingExpert);
 }
 
 /// Sets elementwise dispatches to use peeling approach. It scales the number of
@@ -1709,9 +1686,15 @@ static LogicalResult setElementwiseGenericOpRootConfig(
   if (!linalg::isElementwise(genericOp))
     return failure();
 
+  auto vecPreProcStrategy = getVectorPreProcStrategy(genericOp);
+  LLVM_DEBUG(KD_DBGS() << "Vector pre-processing strategy: "
+                       << vecPreProcStrategy << "\n");
+
   DistributionHeuristicConfig distConfig;
+  distConfig.allowIncompleteTile =
+      vecPreProcStrategy != VectorPreProcStrategy::None;
   distConfig.allowIncompleteTile = true;
-  distConfig.minTileSizes = getMinTilingSizesForEachDim(
+  distConfig.minTileSizes = getVectorSizesForEachDim(
       entryPointFn, genericOp, linalgOpInfo, targetMLTransInfo);
   distConfig.maxTileSizes.append(numLoops, clDefaultDistTileSize);
   SmallVector<int64_t> distTileSizes =
@@ -1747,22 +1730,9 @@ static LogicalResult setElementwiseGenericOpRootConfig(
     distTileSizes[currDim] = newSize;
   }
 
-  auto vecPreProcStrategy = getVectorPreProcStrategy(genericOp);
-  LLVM_DEBUG(KD_DBGS() << "Vector pre-processing strategy: "
-                       << vecPreProcStrategy << "\n");
-
-  // Adjust tiling sizes of vector levels to avoid large unroll factors. Most of
-  // the cases are f32 and i32, so we divide it by 4.
-  int64_t vecSize = getNativeVectorSizeInBytes(entryPointFn) / 4;
   SmallVector<int64_t> vecTileSizes = distConfig.minTileSizes;
-  for (auto &i : vecTileSizes) {
-    i = roundUpToPow2(std::min(i, vecSize),
-                      vecPreProcStrategy == VectorPreProcStrategy::Masking);
-  }
 
-  // Setting reduction tile sizes is a workaround to kick in peeling transform.
-  // The tiling won't happen because the sizes are zeros. Also, no need for
-  // further tiling inner parallel dims, so the 4-th list is also zeros.
+  // No need for tiling reduction dims and inner parallel dims.
   SmallVector<int64_t> zeros(numLoops, 0);
   TileSizesListType tileSizes = {distTileSizes, vecTileSizes, zeros, zeros};
 
@@ -2198,18 +2168,10 @@ adjustTileSizesForGenericOp(func::FuncOp entryPointFn,
   auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(entryPointFn);
   auto targetMLTransInfo =
       TargetMLTransformInfo::getTargetMLTransformInfo(targetAttr);
-  SmallVector<int64_t> vecTileSizes = getMinTilingSizesForEachDim(
+  SmallVector<int64_t> vecTileSizes = getVectorSizesForEachDim(
       entryPointFn, genericOp, linalgOpInfo, targetMLTransInfo);
 
   auto vecPreProcStrategy = getVectorPreProcStrategy(genericOp);
-  int64_t vecSize = getNativeVectorSizeInBytes(entryPointFn) / 4;
-
-  for (auto &vecTileSize : vecTileSizes) {
-    vecTileSize =
-        roundUpToPow2(std::min(vecTileSize, vecSize),
-                      vecPreProcStrategy == VectorPreProcStrategy::Masking);
-  }
-
   splitParallelAndReductionTiles(genericOp, vecTileSizes, reductionTileSizes);
   setVectorSizesForDynamicShapes(genericOp, vecPreProcStrategy, vecTileSizes,
                                  reductionTileSizes);
