@@ -80,6 +80,12 @@ static llvm::cl::opt<bool> clInstrumentMemoryAccesses{
                    "instrumentation is enabled."),
     llvm::cl::init(false)};
 
+static llvm::cl::opt<bool> enableUnPackDecomposition(
+    "iree-llvmcpu-enable-unpack-decomposition",
+    llvm::cl::desc("Enable Decomposition of tensor.unpack Operation. Disable "
+                   "to vectorize tensor.unpack"),
+    llvm::cl::init(true));
+
 static void addTileAndDistributePasses(OpPassManager &pm) {
   pm.addPass(createTileAndDistributeToWorkgroupsPass());
   auto &nestedModulePM = pm.nest<ModuleOp>();
@@ -387,8 +393,8 @@ void addMultiTilingExpertPassPipeline(
 
   {
     nestedModulePM.addNestedPass<func::FuncOp>(createVectorizePadPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createDecomposePackUnPackOpsPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createDecomposePackUnPackOpsPass(
+        /*tileOuterToOne=*/false, enableUnPackDecomposition));
     nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
     nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
 
@@ -547,8 +553,8 @@ void addCPUDataTilingPipeline(OpPassManager &passManager,
   OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
   nestedModulePM.addNestedPass<func::FuncOp>(
       createLLVMCPUTilePass(tilingConfig.getVectorCommonParallelLevel()));
-  nestedModulePM.addNestedPass<func::FuncOp>(
-      createDecomposePackUnPackOpsPass());
+  nestedModulePM.addNestedPass<func::FuncOp>(createDecomposePackUnPackOpsPass(
+      /*tileOuterToOne=*/false, enableUnPackDecomposition));
 
   {
     GenericVectorizationPassOptions options;
