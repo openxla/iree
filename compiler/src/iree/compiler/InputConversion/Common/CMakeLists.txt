@@ -40,6 +40,7 @@ iree_cc_library(
     "Passes.h"
     "Utils.h"
   SRCS
+    "IREECheckIllegalDialects.cpp"
     "IREEImportPublic.cpp"
     "ImportMLProgram.cpp"
     "Passes.cpp"
