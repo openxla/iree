@@ -99,4 +99,24 @@ def EncodingAttr :
   let genVerifyDecl = 0;
 }
 
+def RequiresSyncAttr : IREELinalgExt_Attr<"RequiresSync"> {
+  let mnemonic = "requires_sync";
+  let summary = [{A memory space for memrefs needing synchronization}];
+   let description = [{
+    A memory space which is used to indicate that the given buffer requires
+    synchronization for Read-After-Write and Write-After-Read conflicts. The
+    specified token is used to distinguish between different memory spaces not
+    requiring synchronization between them. If no token is specified, this
+    memory is assumed to require synchronization with memory spaces which do
+    not specify a token.
+  }];
+  let parameters = (ins
+    AttrParameter<"Attribute", "The memory space of the memref">:$memorySpace,
+    // Maybe in future we want something more general like a interval.
+    OptionalParameter<"IntegerAttr", "The token used to differenciate between different buffers not requiring synchronization between them.">:$barrierToken
+  );
+
+  let assemblyFormat = "`<` $memorySpace`,` $barrierToken `>`";
+}
+
 #endif // IREE_DIALECT_LINALGEXT_BASE
