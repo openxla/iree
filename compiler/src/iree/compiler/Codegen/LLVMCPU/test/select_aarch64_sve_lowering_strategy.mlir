@@ -186,7 +186,7 @@ hal.executable private @matmul_tensors_sme  {
 //       SSVE-WITHOUT-SME: linalg.matmul
 //  SSVE-WITHOUT-SME-SAME:     lowering_config = #[[CONFIG]]
 
-//   WITH-SME-DAG: #[[CONFIG:.+]] = #iree_codegen.lowering_config<tile_sizes = {{\[}}[64, 64, 0], {{\[}}[4], [4], 0], [0, 0, 1], [0, 0, 0]]>
+//   WITH-SME-DAG: #[[CONFIG:.+]] = #iree_codegen.lowering_config<tile_sizes = {{\[}}[64, 64, 0], {{\[}}[8], [8], 0], [0, 0, 1], [0, 0, 0]]>
 //   WITH-SME-DAG: #[[TRANSLATION:.+]] = #iree_codegen.translation_info<CPUDoubleTilingExpert>
 //       WITH-SME: hal.executable.export public @matmul_tensors
 //  WITH-SME-SAME:     translation_info = #[[TRANSLATION]]
