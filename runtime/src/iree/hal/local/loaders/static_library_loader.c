@@ -144,9 +144,14 @@ static iree_status_t iree_hal_static_executable_issue_call(
 
   IREE_HAL_EXECUTABLE_LIBRARY_CALL_TRACE_ZONE_BEGIN(z0, executable->identifier,
                                                     library, ordinal);
+  IREE_HAL_EXECUTABLE_LIBRARY_CALL_HOOK_BEGIN(executable->identifier, library,
+                                              ordinal);
   int ret = library->exports.ptrs[ordinal](&base_executable->environment,
                                            dispatch_state, workgroup_state);
-  IREE_TRACE_ZONE_END(z0);
+  IREE_HAL_EXECUTABLE_LIBRARY_CALL_HOOK_END(executable->identifier, library,
+                                            ordinal);
+  IREE_HAL_EXECUTABLE_LIBRARY_CALL_TRACE_ZONE_END(z0, executable->identifier,
+                                                  library, ordinal);
 
   return ret == 0 ? iree_ok_status()
                   : iree_make_status(
