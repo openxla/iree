@@ -272,25 +272,28 @@ jobs:
   test_all:
     needs: [setup, build_all]
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'test_all')
-    runs-on:
-      - self-hosted # must come first
-      - runner-group=${{ needs.setup.outputs.runner-group }}
-      - environment=${{ needs.setup.outputs.runner-env }}
-      - cpu
-      - os-family=Linux
+    runs-on: ubuntu-20.04
     env:
       BUILD_DIR: ${{ needs.build_all.outputs.build-dir }}
       BUILD_DIR_ARCHIVE: ${{ needs.build_all.outputs.build-dir-archive }}
-      BUILD_DIR_GCS_ARTIFACT: ${{ needs.build_all.outputs.build-dir-gcs-artifact }}
+      BUILD_DIR_GCS_ARTIFACT_URL: ${{ needs.build_all.outputs.build-dir-gcs-artifact-url }}
     steps:
       - name: "Checking out repository"
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
         with:
           submodules: true
+      - name: "Check disk space before download"
+        run: df -h
       - name: "Downloading build dir archive"
-        run: gcloud storage cp "${BUILD_DIR_GCS_ARTIFACT}" "${BUILD_DIR_ARCHIVE}"
+        run: wget -q "${BUILD_DIR_GCS_ARTIFACT_URL}"
+      - name: "Check disk space after download"
+        run: df -h
       - name: "Extracting build dir archive"
-        run: tar -xf "${BUILD_DIR_ARCHIVE}"
+        run: |
+          tar -xf "${BUILD_DIR_ARCHIVE}"
+          rm "${BUILD_DIR_ARCHIVE}"
+      - name: "Check disk space after extract"
+        run: df -h
       - name: "Testing all"
         run: |
           ./build_tools/github_actions/docker_run.sh \
@@ -403,7 +406,7 @@ jobs:
   build_test_runtime:
     needs: setup
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'build_test_runtime')
-    runs-on: ubuntu-20.04-64core
+    runs-on: ubuntu-20.04
     env:
       BUILD_DIR: build-runtime
     steps:
@@ -460,7 +463,7 @@ jobs:
   build_test_runtime_windows:
     needs: setup
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'build_test_runtime_windows')
-    runs-on: windows-2022-64core
+    runs-on: windows-2022
     defaults:
       run:
         shell: bash
@@ -489,12 +492,7 @@ jobs:
   test_tf_integrations:
     needs: [setup, build_all]
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'test_tf_integrations')
-    runs-on:
-      - self-hosted # must come first
-      - runner-group=${{ needs.setup.outputs.runner-group }}
-      - environment=${{ needs.setup.outputs.runner-env }}
-      - cpu
-      - os-family=Linux
+    runs-on: ubuntu-20.04
     env:
       BUILD_DIR: ${{ needs.build_all.outputs.build-dir }}
       BUILD_DIR_ARCHIVE: ${{ needs.build_all.outputs.build-dir-archive }}
@@ -504,6 +502,13 @@ jobs:
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
         with:
           submodules: true
+      - id: "gcp-auth"
+        name: "Authenticating to Google Cloud"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: "access_token"
+          credentials_json: "${{ secrets.IREE_OSS_GITHUB_RUNNER_BASIC_TRUST_SERVICE_ACCOUNT_KEY }}"
+          create_credentials_file: false
       - name: "Downloading build dir archive"
         run: gcloud storage cp "${BUILD_DIR_GCS_ARTIFACT}" "${BUILD_DIR_ARCHIVE}"
       - name: "Extracting build dir archive"
@@ -681,7 +686,7 @@ jobs:
   small_runtime:
     needs: setup
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'small_runtime')
-    runs-on: ubuntu-20.04-64core
+    runs-on: ubuntu-20.04
     env:
       BUILD_DIR: build-runtime
     steps:
@@ -738,12 +743,7 @@ jobs:
   tracing:
     needs: setup
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'tracing')
-    runs-on:
-      - self-hosted # must come first
-      - runner-group=${{ needs.setup.outputs.runner-group }}
-      - environment=${{ needs.setup.outputs.runner-env }}
-      - cpu
-      - os-family=Linux
+    runs-on: ubuntu-20.04
     env:
       BUILD_DIR: build-tracing
     steps:
@@ -874,12 +874,7 @@ jobs:
   process_benchmark_results:
     needs: [setup, compilation_benchmarks, execution_benchmarks]
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'process_benchmark_results') && needs.setup.outputs.benchmark-presets != ''
-    runs-on:
-      - self-hosted # must come first
-      - runner-group=${{ needs.setup.outputs.runner-group }}
-      - environment=${{ needs.setup.outputs.runner-env }}
-      - cpu
-      - os-family=Linux
+    runs-on: ubuntu-20.04
     env:
       COMPILE_STATS_RESULTS: ${{ needs.compilation_benchmarks.outputs.compile-stats-results }}
       COMPILE_STATS_RESULTS_GCS_ARTIFACT: ${{ needs.compilation_benchmarks.outputs.compile-stats-results-gcs-artifact }}
@@ -893,6 +888,13 @@ jobs:
         with:
           # We need the full history (and main branch) to generate the report.
           fetch-depth: 0
+      - id: "gcp-auth"
+        name: "Authenticating to Google Cloud"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: "access_token"
+          credentials_json: "${{ secrets.IREE_OSS_GITHUB_RUNNER_BASIC_TRUST_SERVICE_ACCOUNT_KEY }}"
+          create_credentials_file: false
       - name: Downloading compilation benchmark results
         run: |
           gcloud storage cp \
@@ -966,12 +968,7 @@ jobs:
   cross_compile_and_test:
     needs: [setup, build_all]
     if: contains(fromJson(needs.setup.outputs.enabled-jobs), 'cross_compile_and_test')
-    runs-on:
-      - self-hosted # must come first
-      - runner-group=${{ needs.setup.outputs.runner-group }}
-      - environment=${{ needs.setup.outputs.runner-env }}
-      - cpu
-      - os-family=Linux
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         target:
@@ -1017,6 +1014,13 @@ jobs:
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
       - name: "Checking out runtime submodules"
         run: ./build_tools/scripts/git/update_runtime_submodules.sh
+      - id: "gcp-auth"
+        name: "Authenticating to Google Cloud"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: "access_token"
+          credentials_json: "${{ secrets.IREE_OSS_GITHUB_RUNNER_BASIC_TRUST_SERVICE_ACCOUNT_KEY }}"
+          create_credentials_file: false
       - name: "Downloading build dir archive"
         run: gcloud storage cp "${HOST_BUILD_DIR_GCS_ARTIFACT}" "${HOST_BUILD_DIR_ARCHIVE}"
       - name: "Extracting build dir archive"

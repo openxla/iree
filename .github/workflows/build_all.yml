@@ -32,8 +32,12 @@ on:
         value: ${{ jobs.build_all.outputs.build-dir-archive }}
       build-dir-gcs-artifact:
         description: |
-          GCS path to the uploaded build archive.
+          GCS path (gs://...) to the uploaded build archive.
         value: ${{ jobs.build_all.outputs.build-dir-gcs-artifact }}
+      build-dir-gcs-artifact-url:
+        description: |
+          GCS url (https://storage.googleapis.com/...) to the build archive.
+        value: ${{ jobs.build_all.outputs.build-dir-gcs-artifact-url }}
 
 env:
   # This duplicates the variable from ci.yml. The variable needs to be in env
@@ -59,6 +63,7 @@ jobs:
       build-dir: ${{ env.BUILD_DIR }}
       build-dir-archive: ${{ steps.archive.outputs.build-dir-archive }}
       build-dir-gcs-artifact: ${{ steps.upload.outputs.build-dir-gcs-artifact }}
+      build-dir-gcs-artifact-url: ${{ steps.upload.outputs.build-dir-gcs-artifact-url }}
     steps:
       - name: "Checking out repository"
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
@@ -106,3 +111,5 @@ jobs:
         run: |
           gcloud storage cp "${BUILD_DIR_ARCHIVE}" "${BUILD_DIR_GCS_ARTIFACT}"
           echo "build-dir-gcs-artifact=${BUILD_DIR_GCS_ARTIFACT}" >> "${GITHUB_OUTPUT}"
+          ARTIFACT_URL=$(echo ${BUILD_DIR_GCS_ARTIFACT} | sed 's,gs://,https://storage.googleapis.com/,g')
+          echo "build-dir-gcs-artifact-url=${ARTIFACT_URL}" >> "${GITHUB_OUTPUT}"
