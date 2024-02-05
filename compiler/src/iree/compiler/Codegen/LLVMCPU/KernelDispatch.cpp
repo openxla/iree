@@ -1372,31 +1372,40 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
   int64_t vectorSize = getVectorSize(entryPointFn, op.getSourceType());
   DistributionHeuristicConfig distConfig;
   distConfig.allowIncompleteTile = true;
+  distConfig.maxTileSizes.resize(op.getSourceRank(), clDefaultDistTileSize);
   distConfig.vectorSizeHints.resize(op.getSourceRank(), 1);
-  for (auto dim : op.getInnerDimsPos()) {
-    distConfig.vectorSizeHints[dim] = vectorSize;
+  // We aim for larger tile sizes for pack ops so we maxTileSizes to the actual
+  // dimension sizes.
+  for (auto [idx, dimSize] : llvm::enumerate(op.getSourceType().getShape())) {
+    if (ShapedType::isDynamic(dimSize))
+      continue;
+    distConfig.maxTileSizes[idx] = dimSize;
   }
+
+  auto dimPositions = op.getInnerDimsPos();
+  for (int64_t dimPos : dimPositions) {
+    distConfig.vectorSizeHints[dimPos] = vectorSize;
+  }
+
   SmallVector<int64_t> distTileSizes =
       getDefaultDistributedLevelTileSizes(op, distConfig);
-  SmallVector<int64_t> workload(op.getSourceType().getShape());
-  reduceDistributionWorkgroups(workload, distTileSizes,
-                               /*maxTileSizes=*/std::nullopt,
-                               distConfig.vectorSizeHints);
 
-  // The default function aims to returns the number of workload per workgroup,
-  // but it does not know that it is working on packed domain. We need to take
-  // inner tile sizes into account and adjust the distribution tile sizes.
+  // Fixup for making distTileSizes be multiple of inner_tile_dimSizes.
   SmallVector<int64_t> innerTiles = op.getStaticTiles();
-  ArrayRef<int64_t> dimPos = op.getInnerDimsPos();
-  for (auto [pos, size] : llvm::zip_equal(dimPos, innerTiles)) {
-    if (distTileSizes[pos] == 0 || ShapedType::isDynamic(size))
+  for (auto [pos, dimSize] : llvm::zip_equal(dimPositions, innerTiles)) {
+    if (distTileSizes[pos] == 0 || ShapedType::isDynamic(dimSize))
       continue;
-    distTileSizes[pos] = distTileSizes[pos] / size;
-    distTileSizes[pos] = std::max<int64_t>(distTileSizes[pos], 1);
+    distTileSizes[pos] = llvm::alignTo(distTileSizes[pos], dimSize);
   }
 
   SmallVector<int64_t> vecTileSizes = getPackVectorTileSizes(entryPointFn, op);
   TileSizesListType tileSizesList = {distTileSizes, vecTileSizes};
+
+  LLVM_DEBUG(KD_DBGS() << "Final distribution tile sizes for pack op: "
+                       << distTileSizes << "\n");
+  LLVM_DEBUG(KD_DBGS() << "Final vector tile sizes for pack op: "
+                       << distTileSizes << "\n");
+
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, op, tileSizesList,
       DispatchLoweringPassPipeline::CPUDataTiling);
@@ -1404,10 +1413,12 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
 
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    tensor::UnPackOp op) {
+
+  DistributionHeuristicConfig distConfig;
+  distConfig.allowIncompleteTile = false;
   SmallVector<int64_t> distTileSizes =
-      getDefaultDistributedLevelTileSizes(op, DistributionHeuristicConfig{});
+      getDefaultDistributedLevelTileSizes(op, distConfig);
   SmallVector<int64_t> workload(op.getDestType().getShape());
-  reduceDistributionWorkgroups(workload, distTileSizes);
 
   // Fixup for making distTileSizes be multiple of inner_tile_sizes.
   SmallVector<int64_t> innerTiles = op.getStaticTiles();
@@ -1424,6 +1435,12 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
   }
 
   TileSizesListType tileSizesList = {distTileSizes, tileSizes};
+
+  LLVM_DEBUG(KD_DBGS() << "Final distribution tile sizes for unpack op: "
+                       << distTileSizes << "\n");
+  LLVM_DEBUG(KD_DBGS() << "Final vector tile sizes for unpack op: "
+                       << distTileSizes << "\n");
+
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, op, tileSizesList,
       DispatchLoweringPassPipeline::CPUDataTiling);
