@@ -19,11 +19,12 @@ namespace {
 /// Apply dilation and padding to the input of a convolution.
 Value applyConvolutionPadding(Location loc, Value input,
                               DenseIntElementsAttr padding,
-                              DenseIntElementsAttr lhsDilation,
-                              llvm::ArrayRef<int64_t> dimMappings,
+                              DenseI64ArrayAttr lhsDilation,
+                              ArrayRef<int64_t> dimMappings,
                               OpBuilder &rewriter) {
   if ((!padding || isSplatValue(padding, 0)) &&
-      (!lhsDilation || isSplatValue(lhsDilation, 1))) {
+      (!lhsDilation || llvm::all_of(lhsDilation.asArrayRef(),
+                                    [](int64_t v) { return v == 1; }))) {
     return input;
   }
 
@@ -51,7 +52,7 @@ Value applyConvolutionPadding(Location loc, Value input,
     assert(rank == lhsDilation.size() + 2);
     for (int64_t i : llvm::seq<int64_t>(0, lhsDilation.size())) {
       int64_t dim = dimMappings[i];
-      padInterior[dim] = lhsDilation.getValues<int64_t>()[i] - 1;
+      padInterior[dim] = lhsDilation[i] - 1;
     }
   }
 
@@ -83,8 +84,7 @@ Value applyConvolutionReversal(Location loc, OpBuilder &b,
     return filter;
   }
   llvm::SmallVector<int64_t> reversedDims;
-  for (auto [idx, reversed] :
-       llvm::enumerate(reversals.value().getValues<bool>())) {
+  for (auto [idx, reversed] : llvm::enumerate(reversals.value())) {
     if (reversed) {
       reversedDims.push_back(
           op.getDimensionNumbers().getKernelSpatialDimensions()[idx]);
@@ -507,7 +507,7 @@ struct ConvolutionOpGeneralConversion final
 
       AffineExpr stride = dim0;
       if (op.getWindowStrides().has_value())
-        stride = stride * op.getWindowStrides().value().getValues<int64_t>()[i];
+        stride = stride * op.getWindowStrides().value()[i];
       AffineExpr srcExpr = stride + dim1;
 
       srcExprs[lhsIndexMapping[inputSpatialDimensions[i]]] = srcExpr;
@@ -525,8 +525,8 @@ struct ConvolutionOpGeneralConversion final
     }
 
     // Finally, create the computation
-    auto inferredMaps =
-        AffineMap::inferFromExprList({srcExprs, windowExprs, dstExprs});
+    auto inferredMaps = AffineMap::inferFromExprList(
+        {srcExprs, windowExprs, dstExprs}, rewriter.getContext());
 
     Value emptyTensor = rewriter.create<tensor::EmptyOp>(
         loc, reshapedResultShape, resultType.getElementType());
@@ -596,7 +596,9 @@ struct DepthwiseConvolutionOpConversion final
 
     Attribute windowStrides;
     if (op.getWindowStrides()) {
-      windowStrides = op.getWindowStrides().value();
+      windowStrides = DenseIntElementsAttr::get(
+          VectorType::get({spatialRank}, rewriter.getI64Type()),
+          op.getWindowStrides().value());
     } else {
       windowStrides = SplatElementsAttr::get(
           VectorType::get({spatialRank}, rewriter.getI64Type()),
@@ -605,7 +607,9 @@ struct DepthwiseConvolutionOpConversion final
 
     Attribute rhsDilation;
     if (op.getRhsDilation()) {
-      rhsDilation = op.getRhsDilation().value();
+      rhsDilation = DenseIntElementsAttr::get(
+          VectorType::get({spatialRank}, rewriter.getI64Type()),
+          op.getRhsDilation().value());
     } else {
       rhsDilation = SplatElementsAttr::get(
           VectorType::get({spatialRank}, rewriter.getI64Type()),

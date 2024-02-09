@@ -451,15 +451,16 @@ struct ReverseOpConversion final
 // ScanOp
 //===----------------------------------------------------------------------===//
 
-static bool checkUnary(DenseIntElementsAttr attr) {
-  llvm::SmallVector<int64_t> values;
-  values = extract1DVector(attr);
-
+static bool checkUnary(ArrayRef<int64_t> values) {
   bool result = true;
   for (auto value : values) {
     result = result && (value == 1);
   }
   return true;
+}
+
+static bool checkUnary(DenseIntElementsAttr attr) {
+  return checkUnary(extract1DVector(attr));
 }
 
 struct ScanOpConversion final
@@ -490,7 +491,7 @@ struct ScanOpConversion final
     auto init0 = op.getInitValues().front();
     auto init0Ty = init0.getType().cast<ShapedType>();
 
-    auto window = extract1DVector(op.getWindowDimensions());
+    auto window = op.getWindowDimensions();
     llvm::SmallVector<int64_t, 4> reduceAxes;
     for (int i = 0, s = window.size(); i < s; ++i) {
       if (window[i] == 1)

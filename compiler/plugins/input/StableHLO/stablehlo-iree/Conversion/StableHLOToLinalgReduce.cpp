@@ -123,7 +123,7 @@ struct ReduceOpToGenericConverter final
     }
     auto srcRank = cast<ShapedType>(adaptor.getInputs()[0].getType()).getRank();
 
-    SmallVector<int64_t> reductionDims = extract1DVector(op.getDimensions());
+    SmallVector<int64_t> reductionDims(op.getDimensions());
 
     SmallVector<Type> resultTypes;
     if (failed(typeConverter->convertTypes(op.getResultTypes(), resultTypes)))
@@ -220,8 +220,7 @@ struct ReduceOpToReduceConverter final
                                          "unsupported reduce (noop or empty)");
     }
 
-    auto reductionDims =
-        llvm::to_vector(op.getDimensions().getValues<int64_t>());
+    auto reductionDims = llvm::to_vector(op.getDimensions());
     // stablehlo.reduce doesn't specify the order of the reduction dimensions.
     llvm::sort(reductionDims);
 
@@ -332,8 +331,7 @@ struct ReduceWindowOpOnTensorsGenericConversion final
       return failure();
     auto numOperands = initValues.size();
 
-    llvm::SmallVector<int64_t> windowDimensions =
-        extract1DVector(op.getWindowDimensions());
+    auto windowDimensions = op.getWindowDimensions();
 
     llvm::SmallVector<int64_t> padding;
     if (op.getPadding()) {
@@ -342,17 +340,17 @@ struct ReduceWindowOpOnTensorsGenericConversion final
 
     llvm::SmallVector<int64_t> baseDilations;
     if (op.getBaseDilations()) {
-      baseDilations = extract1DVector(*op.getBaseDilations());
+      baseDilations = llvm::to_vector(*op.getBaseDilations());
     }
 
     llvm::SmallVector<int64_t> windowStrides(windowDimensions.size(), 1);
     if (op.getWindowStrides()) {
-      windowStrides = extract1DVector(*op.getWindowStrides());
+      windowStrides = llvm::to_vector(*op.getWindowStrides());
     }
 
     llvm::SmallVector<int64_t> windowDilations(windowDimensions.size(), 1);
     if (op.getWindowDilations()) {
-      windowDilations = extract1DVector(*op.getWindowDilations());
+      windowDilations = llvm::to_vector(*op.getWindowDilations());
     }
 
     auto rank = static_cast<int64_t>(windowDimensions.size());
@@ -386,8 +384,8 @@ struct ReduceWindowOpOnTensorsGenericConversion final
 
     SmallVector<AffineMap> inferredMaps(3, AffineMap::get(ctx));
     if (rank > 0) {
-      inferredMaps =
-          AffineMap::inferFromExprList({srcExprs, windowExprs, dstExprs});
+      inferredMaps = AffineMap::inferFromExprList(
+          {srcExprs, windowExprs, dstExprs}, rewriter.getContext());
     }
 
     SmallVector<AffineMap> indexingMaps;
@@ -556,30 +554,31 @@ struct ReduceWindowOpConversion final
           op, "expected NHWC/NDHWC pooling-based op");
     }
 
-    if (op.getPadding() && !isSplatValue(*op.getPadding(), 0)) {
+    if (op.getPadding() &&
+        !llvm::all_of(*op.getPadding(), [](APInt v) { return v.isZero(); })) {
       return rewriter.notifyMatchFailure(op, "require paddings are all zero");
     }
 
-    if (op.getBaseDilations() && !isSplatValue(*op.getBaseDilations(), 1)) {
+    if (op.getBaseDilations() &&
+        !llvm::all_of(*op.getBaseDilations(),
+                      [](int64_t v) { return v == 1; })) {
       return rewriter.notifyMatchFailure(op, "expected undilated base");
     }
 
     int lastDim = rank - 1;
     SmallVector<int64_t, 2> fakeWindowShapes;
     for (int i = 1; i < lastDim; ++i) {
-      fakeWindowShapes.push_back(
-          op.getWindowDimensions().getValues<int64_t>()[i]);
+      fakeWindowShapes.push_back(op.getWindowDimensions()[i]);
     }
 
     if (op.getWindowStrides() &&
-        (op.getWindowStrides().value().getValues<int64_t>()[0] != 1 ||
-         op.getWindowStrides().value().getValues<int64_t>()[lastDim] != 1)) {
+        (op.getWindowStrides().value()[0] != 1 ||
+         op.getWindowStrides().value()[lastDim] != 1)) {
       return rewriter.notifyMatchFailure(
           op, "expected window_strides to be [1,x,y,(z),1]");
     }
-    if (op.getWindowDimensions() &&
-        (op.getWindowDimensions().getValues<int64_t>()[0] != 1 ||
-         op.getWindowDimensions().getValues<int64_t>()[lastDim] != 1)) {
+    if (op.getWindowDimensions()[0] != 1 ||
+        op.getWindowDimensions()[lastDim] != 1) {
       return rewriter.notifyMatchFailure(
           op, "expected window_dimensions to be [1,x,y,(z),1]");
     }
@@ -588,7 +587,7 @@ struct ReduceWindowOpConversion final
     SmallVector<int64_t> vec;
     if (op.getWindowStridesAttr()) {
       for (int i = 1; i < lastDim; ++i) {
-        vec.push_back(op.getWindowStrides().value().getValues<int64_t>()[i]);
+        vec.push_back(op.getWindowStrides().value()[i]);
       }
     } else {
       vec.assign(rank - 2, 1);
@@ -599,7 +598,7 @@ struct ReduceWindowOpConversion final
     vec.clear();
     if (op.getWindowDilations()) {
       for (int i = 1; i < lastDim; ++i) {
-        vec.push_back(op.getWindowDilations().value().getValues<int64_t>()[i]);
+        vec.push_back(op.getWindowDilations().value()[i]);
       }
     } else {
       vec.assign(rank - 2, 1);
