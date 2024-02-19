@@ -324,12 +324,14 @@ util.func public @cmdCall(%arg0: !stream.resource<external>, %arg1: i32, %arg2: 
 // appropriate queue affinity mask. The final affinity is the result of ORing
 // the target affinities (0b01 | 0b10 = 0b11 = 3).
 
+util.global private @device : !hal.device
+
 // CHECK-LABEL: @cmdExecuteAffinities
 util.func public @cmdExecuteAffinities(%arg0: !stream.resource<transient>, %arg1: index, %arg2: !stream.resource<staging>, %arg3: index, %arg4: !stream.timepoint) -> !stream.timepoint {
   %c0 = arith.constant 0 : index
   %c128 = arith.constant 128 : index
   // CHECK: %[[CMD:.+]] = hal.command_buffer.create
-  %0 = stream.cmd.execute on(#hal.affinity.queue<[0, 1]>) await(%arg4) => with(%arg0 as %arg5: !stream.resource<transient>{%arg1}, %arg2 as %arg6: !stream.resource<staging>{%arg3}) {
+  %0 = stream.cmd.execute on(#hal.device.affinity<@device, [0, 1]>) await(%arg4) => with(%arg0 as %arg5: !stream.resource<transient>{%arg1}, %arg2 as %arg6: !stream.resource<staging>{%arg3}) {
     stream.cmd.copy %arg5[%c0], %arg6[%c0], %c128 : !stream.resource<transient>{%arg1} -> !stream.resource<staging>{%arg3}
   } => !stream.timepoint
   // CHECK: hal.device.queue.execute
