@@ -7,11 +7,13 @@
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
 #include "iree/compiler/Utils/StringUtils.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Parser/Parser.h"
 
 // clang-format off: must be included after all LLVM/MLIR headers.
@@ -23,7 +25,7 @@
 namespace mlir::iree_compiler::IREE::HAL {
 
 //===----------------------------------------------------------------------===//
-// Enum utilities
+// Utilities
 //===----------------------------------------------------------------------===//
 
 template <typename AttrType>
@@ -339,6 +341,114 @@ DeviceTargetAttr::lookupExecutableTargets(Operation *op) {
     }
   }
   return resultAttrs;
+}
+
+void IREE::HAL::DeviceTargetAttr::printStatusDescription(
+    llvm::raw_ostream &os) const {
+  cast<Attribute>().print(os, /*elideType=*/true);
+}
+
+// Produces a while-loop that enumerates each device available and tries to
+// match it against the target information. SCF is... not very wieldy, but this
+// is effectively:
+// ```
+//   %device_count = hal.devices.count : index
+//   %result:2 = scf.while(%i = 0, %device = null) {
+//     %is_null = util.cmp.eq %device, null : !hal.device
+//     %in_bounds = arith.cmpi slt %i, %device_count : index
+//     %continue_while = arith.andi %is_null, %in_bounds : i1
+//     scf.condition(%continue_while) %i, %device : index, !hal.device
+//   } do {
+//     %device_i = hal.devices.get %i : !hal.device
+//     %is_match = <<buildDeviceMatch>>(%device_i)
+//     %try_device = arith.select %is_match, %device_i, null : !hal.device
+//     %next_i = arith.addi %i, %c1 : index
+//     scf.yield %next_i, %try_device : index, !hal.device
+//   }
+// ```
+// Upon completion %result#1 contains the device (or null).
+Value IREE::HAL::DeviceTargetAttr::buildDeviceEnumeration(
+    Location loc, const IREE::HAL::TargetRegistry &targetRegistry,
+    OpBuilder &builder) const {
+  // Defers to the target backend to build the device match or does a simple
+  // fallback for unregistered backends (usually for testing, but may be used
+  // as a way to bypass validation for out-of-tree experiments).
+  auto buildDeviceMatch = [&](Location loc, Value device,
+                              OpBuilder &builder) -> Value {
+    // Ask the target backend to build the match expression. It may opt to
+    // let the default handling take care of things.
+    Value match;
+    auto targetDevice = targetRegistry.getTargetDevice(getDeviceID());
+    if (targetDevice) {
+      match = targetDevice->buildDeviceTargetMatch(loc, device, *this, builder);
+    }
+    if (match)
+      return match;
+
+    // Match first on the device ID, as that's the top-level filter.
+    Value idMatch = IREE::HAL::DeviceQueryOp::createI1(
+        loc, device, "hal.device.id", getDeviceID(), builder);
+
+    // If there are executable formats defined we should check at least one of
+    // them is supported.
+    auto executableTargetAttrs =
+        const_cast<IREE::HAL::DeviceTargetAttr *>(this)->getExecutableTargets();
+    if (executableTargetAttrs.empty()) {
+      match = idMatch; // just device ID
+    } else {
+      auto ifOp = builder.create<scf::IfOp>(loc, builder.getI1Type(), idMatch,
+                                            true, true);
+      auto thenBuilder = ifOp.getThenBodyBuilder();
+      Value anyFormatMatch;
+      for (auto executableTargetAttr : executableTargetAttrs) {
+        Value formatMatch = IREE::HAL::DeviceQueryOp::createI1(
+            loc, device, "hal.executable.format",
+            executableTargetAttr.getFormat().getValue(), thenBuilder);
+        if (!anyFormatMatch) {
+          anyFormatMatch = formatMatch;
+        } else {
+          anyFormatMatch = thenBuilder.create<arith::OrIOp>(loc, anyFormatMatch,
+                                                            formatMatch);
+        }
+      }
+      thenBuilder.create<scf::YieldOp>(loc, anyFormatMatch);
+      auto elseBuilder = ifOp.getElseBodyBuilder();
+      Value falseValue = elseBuilder.create<arith::ConstantIntOp>(loc, 0, 1);
+      elseBuilder.create<scf::YieldOp>(loc, falseValue);
+      match = ifOp.getResult(0);
+    }
+
+    return match;
+  };
+
+  // Enumerate all devices and match the first one found (if any).
+  Type indexType = builder.getIndexType();
+  Type deviceType = builder.getType<IREE::HAL::DeviceType>();
+  Value c0 = builder.create<arith::ConstantIndexOp>(loc, 0);
+  Value c1 = builder.create<arith::ConstantIndexOp>(loc, 1);
+  Value nullDevice = builder.create<IREE::Util::NullOp>(loc, deviceType);
+  Value deviceCount = builder.create<IREE::HAL::DevicesCountOp>(loc, indexType);
+  auto whileOp = builder.create<scf::WhileOp>(
+      loc, TypeRange{indexType, deviceType}, ValueRange{c0, nullDevice},
+      [&](OpBuilder &beforeBuilder, Location loc, ValueRange operands) {
+        Value isNull = beforeBuilder.create<IREE::Util::CmpEQOp>(
+            loc, operands[1], nullDevice);
+        Value inBounds = beforeBuilder.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::slt, operands[0], deviceCount);
+        Value continueWhile =
+            beforeBuilder.create<arith::AndIOp>(loc, isNull, inBounds);
+        beforeBuilder.create<scf::ConditionOp>(loc, continueWhile, operands);
+      },
+      [&](OpBuilder &afterBuilder, Location loc, ValueRange operands) {
+        Value device = afterBuilder.create<IREE::HAL::DevicesGetOp>(
+            loc, deviceType, operands[0]);
+        Value isMatch = buildDeviceMatch(loc, device, afterBuilder);
+        Value tryDevice = afterBuilder.create<arith::SelectOp>(
+            loc, isMatch, device, nullDevice);
+        Value nextI = afterBuilder.create<arith::AddIOp>(loc, operands[0], c1);
+        afterBuilder.create<scf::YieldOp>(loc, ValueRange{nextI, tryDevice});
+      });
+  return whileOp.getResult(1);
 }
 
 //===----------------------------------------------------------------------===//
@@ -664,6 +774,103 @@ std::optional<ArrayAttr> ExecutableObjectsAttr::getApplicableObjects(
   if (allObjectAttrs.empty())
     return std::nullopt;
   return ArrayAttr::get(specificTargetAttr.getContext(), allObjectAttrs);
+}
+
+//===----------------------------------------------------------------------===//
+// #hal.device.ordinal<*>
+//===----------------------------------------------------------------------===//
+
+void IREE::HAL::DeviceOrdinalAttr::printStatusDescription(
+    llvm::raw_ostream &os) const {
+  cast<Attribute>().print(os, /*elideType=*/true);
+}
+
+Value IREE::HAL::DeviceOrdinalAttr::buildDeviceEnumeration(
+    Location loc, const IREE::HAL::TargetRegistry &targetRegistry,
+    OpBuilder &builder) const {
+  return builder.create<IREE::HAL::DevicesGetOp>(
+      loc, getType(),
+      builder.create<arith::ConstantIndexOp>(loc, getOrdinal()));
+}
+
+//===----------------------------------------------------------------------===//
+// #hal.device.fallback<*>
+//===----------------------------------------------------------------------===//
+
+void IREE::HAL::DeviceFallbackAttr::printStatusDescription(
+    llvm::raw_ostream &os) const {
+  cast<Attribute>().print(os, /*elideType=*/true);
+}
+
+Value IREE::HAL::DeviceFallbackAttr::buildDeviceEnumeration(
+    Location loc, const IREE::HAL::TargetRegistry &targetRegistry,
+    OpBuilder &builder) const {
+  // TODO(benvanik): hal.device.cast if needed - may need to look up the global
+  // to do it as we don't encode what the device is here in a way that is
+  // guaranteed to be consistent.
+  return builder.create<IREE::Util::GlobalLoadOp>(loc, getType(),
+                                                  getName().getValue());
+}
+
+//===----------------------------------------------------------------------===//
+// #hal.device.select<*>
+//===----------------------------------------------------------------------===//
+
+// static
+LogicalResult
+DeviceSelectAttr::verify(function_ref<mlir::InFlightDiagnostic()> emitError,
+                         Type type, ArrayAttr devicesAttr) {
+  if (devicesAttr.empty())
+    return emitError() << "must have at least one device to select";
+  for (auto deviceAttr : devicesAttr) {
+    if (!deviceAttr.isa<IREE::HAL::DeviceInitializationAttrInterface>()) {
+      return emitError() << "can only select between #hal.device.target, "
+                            "#hal.device.ordinal, #hal.device.fallback, or "
+                            "other device initialization attributes";
+    }
+  }
+  // TODO(benvanik): when !hal.device is parameterized we should check that the
+  // type is compatible with the entries.
+  return success();
+}
+
+void IREE::HAL::DeviceSelectAttr::printStatusDescription(
+    llvm::raw_ostream &os) const {
+  // TODO(benvanik): print something easier to read (newline per device, etc).
+  cast<Attribute>().print(os, /*elideType=*/true);
+}
+
+// Builds a recursive nest of try-else blocks for each device specified.
+Value IREE::HAL::DeviceSelectAttr::buildDeviceEnumeration(
+    Location loc, const IREE::HAL::TargetRegistry &targetRegistry,
+    OpBuilder &builder) const {
+  Type deviceType = builder.getType<IREE::HAL::DeviceType>();
+  Value nullDevice = builder.create<IREE::Util::NullOp>(loc, deviceType);
+  std::function<Value(ArrayRef<IREE::HAL::DeviceInitializationAttrInterface>,
+                      OpBuilder &)>
+      buildTry;
+  buildTry =
+      [&](ArrayRef<IREE::HAL::DeviceInitializationAttrInterface> deviceAttrs,
+          OpBuilder &tryBuilder) -> Value {
+    auto deviceAttr = deviceAttrs.front();
+    Value tryDevice =
+        deviceAttr.buildDeviceEnumeration(loc, targetRegistry, tryBuilder);
+    if (deviceAttrs.size() == 1)
+      return tryDevice; // termination case
+    Value isNull =
+        tryBuilder.create<IREE::Util::CmpEQOp>(loc, tryDevice, nullDevice);
+    auto ifOp =
+        tryBuilder.create<scf::IfOp>(loc, deviceType, isNull, true, true);
+    auto thenBuilder = ifOp.getThenBodyBuilder();
+    Value tryChainDevice = buildTry(deviceAttrs.drop_front(1), thenBuilder);
+    thenBuilder.create<scf::YieldOp>(loc, tryChainDevice);
+    auto elseBuilder = ifOp.getElseBodyBuilder();
+    elseBuilder.create<scf::YieldOp>(loc, tryDevice);
+    return ifOp.getResult(0);
+  };
+  SmallVector<IREE::HAL::DeviceInitializationAttrInterface> deviceAttrs(
+      getDevices().getAsRange<IREE::HAL::DeviceInitializationAttrInterface>());
+  return buildTry(deviceAttrs, builder);
 }
 
 //===----------------------------------------------------------------------===//

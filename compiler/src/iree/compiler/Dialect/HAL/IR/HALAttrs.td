@@ -473,8 +473,9 @@ def HAL_InterfaceBindingArrayAttr :
 // #hal.device.target<*>
 //===----------------------------------------------------------------------===//
 
-def HAL_DeviceTargetAttr :
-    AttrDef<HAL_Dialect, "DeviceTarget"> {
+def HAL_DeviceTargetAttr : AttrDef<HAL_Dialect, "DeviceTarget", [
+  DeclareAttrInterfaceMethods<HAL_DeviceInitializationAttrInterface>,
+]> {
   let mnemonic = "device.target";
   let summary = [{generic device target specification}];
   let description = [{
@@ -483,6 +484,9 @@ def HAL_DeviceTargetAttr :
     by the runtime (such as `cpu`, `vulkan`, etc). Target devices may support
     several target executable formats specified with `#hal.executable.target`.
     An optional configuration dictionary allows for overriding backend defaults.
+
+    If used to initialize a device global returns the first device matching or
+    null if no devices match.
 
     Example:
     ```mlir
@@ -504,6 +508,8 @@ def HAL_DeviceTargetAttr :
   ];
 
   let extraClassDeclaration = [{
+    Type getType() { return IREE::HAL::DeviceType::get(getContext()); }
+
     // Returns a symbol-compatible name that pseudo-uniquely identifies this
     // target. Callers must perform deduplication when required.
     std::string getSymbolNameFragment();
@@ -551,6 +557,7 @@ def HAL_DeviceTargetAttr :
     static SmallVector<IREE::HAL::ExecutableTargetAttr, 4>
     lookupExecutableTargets(Operation *op);
   }];
+
   let hasCustomAssemblyFormat = 1;
 }
 
@@ -729,6 +736,114 @@ def HAL_ExecutableObjectsAttr : AttrDef<HAL_Dialect, "ExecutableObjects"> {
     std::optional<ArrayAttr> getApplicableObjects(
         IREE::HAL::ExecutableTargetAttr specificTargetAttr);
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// #hal.device.ordinal<*>
+//===----------------------------------------------------------------------===//
+
+def HAL_DeviceOrdinalAttr : AttrDef<HAL_Dialect, "DeviceOrdinal", [
+  DeclareAttrInterfaceMethods<HAL_DeviceInitializationAttrInterface>,
+]> {
+  let mnemonic = "device.ordinal";
+  let summary = [{specifies a device by runtime registration ordinal}];
+  let description = [{
+    Represents the device registered with the runtime in the order it was
+    registered with ordinal 0 being the first registered. Returns null during
+    initialization if the device ordinal is out of range.
+  }];
+
+  let parameters = (ins
+    AttributeSelfTypeParameter<"">:$type,
+    AttrParameter<"int64_t", "">:$ordinal
+  );
+
+  let assemblyFormat = [{
+    `<` $ordinal `>`
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// #hal.device.fallback<*>
+//===----------------------------------------------------------------------===//
+
+def HAL_DeviceFallbackAttr : AttrDef<HAL_Dialect, "DeviceFallback", [
+  DeclareAttrInterfaceMethods<HAL_DeviceInitializationAttrInterface>,
+]> {
+  let mnemonic = "device.fallback";
+  let summary = [{specifies a reference to another device}];
+  let description = [{
+    Specifies by symbol a device that has already been initialized.
+    Returns null during initialization if the device specified as a fallback is
+    null.
+  }];
+
+  let parameters = (ins
+    AttributeSelfTypeParameter<"">:$type,
+    AttrParameter<"FlatSymbolRefAttr", "">:$name
+  );
+
+  let assemblyFormat = [{
+    `<` $name `>`
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// #hal.device.select<*>
+//===----------------------------------------------------------------------===//
+
+def HAL_DeviceSelectAttr : AttrDef<HAL_Dialect, "DeviceSelect", [
+  DeclareAttrInterfaceMethods<HAL_DeviceInitializationAttrInterface>,
+]> {
+  let mnemonic = "device.select";
+  let summary = [{selects a device from one or more options}];
+  let description = [{
+    Selects a HAL device at runtime by either enumerating and querying for
+    target support or matching the given existing device by affinity.
+    Devices are selected in the order listed. Fails during initialization if no
+    device can be selected.
+
+    Examples:
+    ```mlir
+    // Selects a single device matching the given target.
+    #hal.device.select<[
+      #hal.device.target<"..."> : !hal.device
+    ]> : !hal.device
+    // Selects a specific device with the given symbol.
+    #hal.device.select<[
+      #hal.device.fallback<@device_0> : !hal.device
+    ]> : !hal.device
+    // Selects a specific device by ordinal as registered at runtime.
+    #hal.device.select<[
+      #hal.device.ordinal<0> : !hal.device
+    ]> : !hal.device
+    // Selects an optional device if available and otherwise @fallback.
+    #hal.device.select<[
+      #hal.device.target<"some_optional_device"> : !hal.device,
+      #hal.device.fallback<@fallback> : !hal.device
+    ]> : !hal.device
+    ```
+  }];
+
+  let parameters = (ins
+    AttributeSelfTypeParameter<"">:$type,
+    AttrParameter<"ArrayAttr", "">:$devices
+  );
+
+  let builders = [
+    AttrBuilder<(ins
+      "IREE::HAL::DeviceTargetAttr":$device
+    )>,
+    AttrBuilder<(ins
+      "ArrayRef<Attribute>":$values
+    )>,
+  ];
+
+  let assemblyFormat = [{
+    `<` $devices `>`
+  }];
+
+  let genVerifyDecl = 1;
 }
 
 //===----------------------------------------------------------------------===//

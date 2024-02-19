@@ -38,6 +38,14 @@ public:
     return {};
   }
 
+  // Builds an expression that returns an i1 indicating whether the given
+  // |device| matches the |targetAttr| requirements.
+  virtual Value buildDeviceTargetMatch(Location loc, Value device,
+                                       IREE::HAL::DeviceTargetAttr targetAttr,
+                                       OpBuilder &builder) const {
+    return {};
+  }
+
   // TODO(benvanik): pipeline registration for specialization of host code at
   // various stages.
 };

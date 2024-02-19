@@ -33,6 +33,8 @@
 
 namespace mlir::iree_compiler::IREE::HAL {
 
+class TargetRegistry;
+
 #include "iree/compiler/Dialect/HAL/IR/HALAttrInterfaces.h.inc" // IWYU pragma: export
 #include "iree/compiler/Dialect/HAL/IR/HALOpInterfaces.h.inc" // IWYU pragma: export
 #include "iree/compiler/Dialect/HAL/IR/HALTypeInterfaces.h.inc" // IWYU pragma: export
