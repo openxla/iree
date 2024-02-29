@@ -205,9 +205,16 @@ public:
     return getDeviceTargetFromTarget(context, *maybeTarget, defaultAddlConfig_);
   }
 
+  LogicalResult addLoweringStrategy(
+      std::unique_ptr<IREE::HAL::LoweringStrategy> strategy) override {
+    loweringStrategies.emplace_back(std::move(strategy));
+    return success();
+  }
+
   void buildConfigurationPassPipeline(IREE::HAL::ExecutableVariantOp variantOp,
                                       OpPassManager &passManager) override {
-    buildLLVMCPUCodegenConfigurationPassPipeline(passManager);
+    buildLLVMCPUCodegenConfigurationPassPipeline(passManager,
+                                                 loweringStrategies);
   }
 
   void buildTranslationPassPipeline(IREE::HAL::ExecutableVariantOp variantOp,
@@ -897,6 +904,9 @@ private:
   // Additional target information besides that is contained in
   // LLVMTargetOptions defaultOptions_.
   AdditionalConfigurationValues defaultAddlConfig_;
+
+  // TODO
+  LoweringStrategyList loweringStrategies;
 };
 
 void registerLLVMCPUTargetBackends(
