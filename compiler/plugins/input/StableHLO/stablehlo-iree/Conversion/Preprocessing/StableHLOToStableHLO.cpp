@@ -1185,12 +1185,16 @@ struct ReorderBroadcastInDimOpAndElementwiseOp final
     rewriter.replaceOpWithNewOp<mlir::stablehlo::BroadcastInDimOp>(
         op, op.getType(), result, bcastOps[0].getBroadcastDimensionsAttr());
 
+    llvm::SetVector<Operation *> opsToErase;
     for (auto bcastOp : bcastOps) {
       if (bcastOp.getOperation()->use_empty()) {
-        rewriter.eraseOp(bcastOp);
+        opsToErase.insert(bcastOp.getOperation());
       }
     }
 
+    for (auto opToErase : opsToErase) {
+      rewriter.eraseOp(opToErase);
+    }
     return success();
   }
 };
