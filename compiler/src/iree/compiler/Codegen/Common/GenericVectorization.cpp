@@ -87,6 +87,46 @@ inferVectorSizesFromIR(linalg::LinalgOp linalgOp) {
 }
 
 static std::optional<SmallVector<int64_t>>
+inferVectorSizesFromIR(tensor::UnPackOp op) {
+  LLVM_DEBUG(VEC_DBGS() << "Inferring vector sizes for:\n" << op << "\n");
+
+  if (llvm::any_of(op.getInnerTiles(), [](OpFoldResult v) {
+        return !getConstantIntValue(v).has_value();
+      })) {
+    LLVM_DEBUG(VEC_DBGS() << "skip, because inner_tiles are not all constant");
+    return std::nullopt;
+  }
+
+  SmallVector<int64_t> vectorSizes;
+  auto inferred = inferVectorSizesFromIR(op.getSource());
+  if (!inferred) {
+    return std::nullopt;
+  }
+  vectorSizes = inferred.value();
+
+  vectorSizes.resize(op.getDestType().getRank());
+  auto outerDimsPerm = op.getOuterDimsPerm();
+  if (!outerDimsPerm.empty()) {
+    applyPermutationToVector(vectorSizes,
+                             invertPermutationVector(outerDimsPerm));
+  }
+  for (auto [dimPos, tileSize] :
+       llvm::zip_equal(op.getInnerDimsPos(), op.getStaticInnerTiles())) {
+    vectorSizes[dimPos] *= tileSize;
+  }
+
+  LLVM_DEBUG({
+    VEC_DBGS() << "After adjustment with inner tiles and "
+                  "outer_dims_perm:\n";
+    for (auto [idx, val] : llvm::enumerate(vectorSizes)) {
+      llvm::dbgs() << "Dim #" << idx << ": " << val << "\n";
+    }
+  });
+
+  return vectorSizes;
+}
+
+static std::optional<SmallVector<int64_t>>
 inferVectorSizesFromIR(tensor::PackOp op) {
   LLVM_DEBUG(VEC_DBGS() << "Inferring vector sizes for:\n" << op << "\n");
 
@@ -186,6 +226,10 @@ getVectorSizes(Operation *op, bool useConfiguredVectorSizes) {
       .Case<tensor::PackOp>([&](tensor::PackOp packOp) {
         vectorSizes = inferVectorSizesFromIR(packOp);
       })
+      .Case<tensor::UnPackOp>([&](tensor::UnPackOp unPackOp) {
+        vectorSizes = inferVectorSizesFromIR(unPackOp);
+      })
+
       .Default([&](Operation *) {});
   if (vectorSizes) {
     // This can't identify scalable flags, so pad them with `false`.
@@ -244,6 +288,8 @@ void GenericVectorizationPass::runOnOperation() {
                isa<tensor::PadOp>(op)) {
       candidates.push_back(op);
     } else if (enableVectorMasking && isa<tensor::PackOp>(op)) {
+      candidates.push_back(op);
+    } else if (enableVectorMasking && isa<tensor::UnPackOp>(op)) {
       candidates.push_back(op);
     }
   });
