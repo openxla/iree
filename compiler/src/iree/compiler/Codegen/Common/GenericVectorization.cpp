@@ -103,6 +103,13 @@ inferVectorSizesFromIR(tensor::UnPackOp op) {
     return std::nullopt;
   }
   vectorSizes = inferred.value();
+  LLVM_DEBUG({
+    VEC_DBGS() << "After adjustment with inner tiles and "
+                  "outer_dims_perm:\n";
+    for (auto [idx, val] : llvm::enumerate(vectorSizes)) {
+      llvm::dbgs() << "Dim #" << idx << ": " << val << "\n";
+    }
+  });
 
   vectorSizes.resize(op.getDestType().getRank());
   auto outerDimsPerm = op.getOuterDimsPerm();
@@ -168,6 +175,14 @@ inferVectorSizesFromIR(tensor::PackOp op) {
 }
 
 static std::optional<SmallVector<int64_t>> inferVectorSizesFromIR(Value val) {
+  if (!val.getDefiningOp()) {
+    auto type = dyn_cast<RankedTensorType>(val.getType());
+    if (!type || !type.hasStaticShape()) {
+      return std::nullopt;
+    }
+    return SmallVector<int64_t>(type.getShape());
+  }
+
   std::optional<SmallVector<int64_t>> result;
   TypeSwitch<Operation *, void>(val.getDefiningOp())
       .Case<linalg::LinalgOp, tensor::PackOp>(
@@ -282,14 +297,10 @@ void GenericVectorizationPass::runOnOperation() {
   IRRewriter rewriter(context);
   SmallVector<Operation *> candidates;
   funcOp.walk([&](Operation *op) {
-    if (isa<linalg::LinalgOp>(op)) {
+    if (isa<linalg::LinalgOp, tensor::PackOp, tensor::UnPackOp>(op)) {
       candidates.push_back(op);
     } else if (vectorizePadding && enableVectorMasking &&
                isa<tensor::PadOp>(op)) {
-      candidates.push_back(op);
-    } else if (enableVectorMasking && isa<tensor::PackOp>(op)) {
-      candidates.push_back(op);
-    } else if (enableVectorMasking && isa<tensor::UnPackOp>(op)) {
       candidates.push_back(op);
     }
   });
@@ -307,6 +318,35 @@ void GenericVectorizationPass::runOnOperation() {
         auto [sizes, scalableDims] = *vectorSizesAndScalableDims;
         vectorSizes.append(sizes.begin(), sizes.end());
         scalableVecDims.append(scalableDims.begin(), scalableDims.end());
+      }
+    } else if (isa<tensor::PackOp, tensor::UnPackOp>(op)) {
+      // TODO: Support vectorization for static cases without passing
+      // input_vector_sizes.
+      bool isStatic = true;
+      for (auto type : op->getOperandTypes()) {
+        auto rankedType = dyn_cast<RankedTensorType>(type);
+        if (!rankedType || !rankedType.hasStaticShape()) {
+          isStatic = false;
+          break;
+        }
+      }
+      if (!isStatic) {
+        continue;
+      }
+      std::optional<SizesAndScalableFlags> vectorSizesAndScalableDims =
+          getVectorSizes(op, useConfiguredVectorSizes);
+      if (vectorSizesAndScalableDims) {
+        auto [sizes, scalableDims] = *vectorSizesAndScalableDims;
+        vectorSizes.append(sizes.begin(), sizes.end());
+        scalableVecDims.append(scalableDims.begin(), scalableDims.end());
+      }
+      if (auto unpackOp = dyn_cast<tensor::UnPackOp>(op)) {
+        if (vectorSizes != unpackOp.getDestType().getShape())
+          continue;
+      }
+      if (auto packOp = dyn_cast<tensor::PackOp>(op)) {
+        if (packOp.getPaddingValue())
+          continue;
       }
     }
 
