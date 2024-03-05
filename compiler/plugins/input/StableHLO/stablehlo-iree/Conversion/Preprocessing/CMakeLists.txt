@@ -62,6 +62,7 @@ iree_cc_library(
     "FlattenTuplesInCFG.cpp"
     "FlattenTuplesInSCF.cpp"
     "GatherToTorchIndexSelect.cpp"
+    "LimitScatterBounds.cpp"
     "LowerComplex.cpp"
     "Passes.cpp"
     "StableHLOToStableHLO.cpp"
@@ -76,6 +77,7 @@ iree_cc_library(
     MLIRFuncDialect
     MLIRFunctionInterfaces
     MLIRIR
+    MLIRLinalgDialect
     MLIRMathDialect
     MLIRPass
     MLIRSCFDialect
