@@ -1744,27 +1744,24 @@ static LogicalResult setConfigForKernel(const spirv::TargetEnv &targetEnv,
       "loop body is expected to be set as root");
 }
 
-LogicalResult initSPIRVLaunchConfig(ModuleOp module) {
-  llvm::StringMap<IREE::HAL::ExecutableExportOp> exportOps =
-      getAllEntryPoints(module);
-  spirv::TargetEnvAttr targetEnvAttr = getSPIRVTargetEnvAttr(module);
+LogicalResult initSPIRVLaunchConfig(FunctionOpInterface funcOp) {
+  spirv::TargetEnvAttr targetEnvAttr = getSPIRVTargetEnvAttr(funcOp);
   if (!targetEnvAttr) {
-    return module.emitOpError(
+    return funcOp.emitOpError(
         "expected parent hal.executable.variant to have spirv.target_env "
         "attribute");
   }
+  if (getTranslationInfo(funcOp)) {
+    return success();
+  }
+
+  std::optional<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
+  if (!exportOp) {
+    return success();
+  }
   spirv::TargetEnv targetEnv(targetEnvAttr);
-
-  for (auto funcOp : module.getOps<mlir::FunctionOpInterface>()) {
-    auto exportOp = exportOps.lookup(funcOp.getName());
-    if (!exportOp)
-      continue;
-    if (getTranslationInfo(exportOp))
-      continue;
-
-    if (failed(setConfigForKernel(targetEnv, exportOp, funcOp))) {
-      return failure();
-    }
+  if (failed(setConfigForKernel(targetEnv, exportOp.value(), funcOp))) {
+    return failure();
   }
 
   return success();

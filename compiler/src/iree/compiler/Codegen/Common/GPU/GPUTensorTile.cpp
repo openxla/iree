@@ -332,11 +332,14 @@ public:
   }
   void runOnOperation() override {
     auto funcOp = getOperation();
-    if (!isEntryPoint(funcOp))
+    std::optional<IREE::HAL::ExecutableExportOp> exportOp =
+        getEntryPoint(funcOp);
+    if (!exportOp) {
       return;
+    }
 
     auto workgroupSize = llvm::map_to_vector(
-        getEntryPoint(funcOp)->getWorkgroupSize().value(),
+        exportOp->getWorkgroupSize().value(),
         [&](Attribute attr) { return llvm::cast<IntegerAttr>(attr).getInt(); });
     if (failed(tileParallelDims(funcOp, workgroupSize, distributeToWarp))) {
       return signalPassFailure();

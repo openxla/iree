@@ -36,10 +36,7 @@ bool usesSPIRVCodeGen(IREE::HAL::ExecutableVariantOp variantOp) {
 const char *getSPIRVDistributeAttrName() { return "iree.spirv.distribute_dim"; }
 
 DictionaryAttr getTargetConfigAttr(Operation *op) {
-  auto variant = op->getParentOfType<IREE::HAL::ExecutableVariantOp>();
-  if (!variant)
-    return nullptr;
-  IREE::HAL::ExecutableTargetAttr targetAttr = variant.getTarget();
+  auto targetAttr = IREE::HAL::ExecutableTargetAttr::lookup(op);
   if (!targetAttr)
     return nullptr;
   return targetAttr.getConfiguration();
@@ -61,13 +58,10 @@ UnitAttr getIndirectBindingsAttr(Operation *op) {
 }
 
 std::optional<int> getSPIRVSubgroupSize(mlir::FunctionOpInterface funcOp) {
-  auto moduleOp = funcOp->getParentOfType<ModuleOp>();
-  llvm::StringMap<IREE::HAL::ExecutableExportOp> exportOps =
-      getAllEntryPoints(moduleOp);
-  auto exportOp = exportOps.lookup(funcOp.getName());
+  auto exportOp = getEntryPoint(funcOp);
   if (!exportOp)
     return std::nullopt;
-  if (auto size = exportOp.getSubgroupSize())
+  if (auto size = exportOp->getSubgroupSize())
     return size->getSExtValue();
 
   spirv::TargetEnvAttr target = getSPIRVTargetEnvAttr(funcOp);

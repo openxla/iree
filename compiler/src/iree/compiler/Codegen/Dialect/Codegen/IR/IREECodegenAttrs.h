@@ -39,36 +39,9 @@ namespace mlir::iree_compiler {
 // `hal.executable.export`
 //===----------------------------------------------------------------------===//
 
-/// Gets the translate executable info attribute value associated with
-/// `exportOp`. It expects that the attribute is stored using the identifier
-/// `translation_info`.
+/// Returns the translation info for the `funcOp`. Returns `nullptr` on failure.
 IREE::Codegen::TranslationInfoAttr
-getTranslationInfo(IREE::HAL::ExecutableExportOp exportOp);
-/// Returns the translation info for the `funcOp` (by looking at the entry
-/// point). Returns `nullptr` on failure.
-inline IREE::Codegen::TranslationInfoAttr
-getTranslationInfo(mlir::FunctionOpInterface funcOp) {
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
-  if (failed(exportOp))
-    return nullptr;
-  return getTranslationInfo(*exportOp);
-}
-
-/// Returns the identical TranslationInfoAttr. Returns nullptr if entry point
-/// functions have different TranslationInfoAttr.
-/// There might be multiple entry points in the module. Currently, all of them
-/// need to have the same translation info.
-/// TODO(ravishankarm): This is strange that this is not enforced
-/// structurally, but something to address later on. The main issue is how
-/// to invoke separate dynamic pass pipelines on  entry point functions,
-/// when the passes might have module level changes. For now this
-/// restriction is fine.
-std::optional<IREE::Codegen::TranslationInfoAttr>
-getIdenticalTranslationInfo(IREE::HAL::ExecutableVariantOp variantOp);
-
-// TODO(ravishankarm, benvanik): Eventually all the information needed for the
-// lowering will be consolidated into a single attribute with richer
-// information.
+getTranslationInfo(mlir::FunctionOpInterface funcOp);
 
 /// Returns the workgroup size specified on the `exportOp`.
 SmallVector<int64_t> getWorkgroupSize(IREE::HAL::ExecutableExportOp exportOp);
@@ -144,8 +117,17 @@ inline LogicalResult setOpConfigAndEntryPointFnTranslation(
   auto config = IREE::Codegen::LoweringConfigAttr::get(context, tileSizes,
                                                        scalableTileFlags);
   setLoweringConfig(op, config);
-  if (failed(setDispatchConfig(entryPointFn, workgroupSize, subgroupSize)))
-    return failure();
+  if (!workgroupSize.empty() || subgroupSize) {
+    // Add the dispatch config only when workgroup size and subgroup size are
+    // specified. This allows for cases where there is no entry point specified
+    // to pass through without failing.
+    // TODO: Really need to think about where this is set. This is not the
+    // best place cause it assumes we have a single function which is the
+    // entry point.
+    if (failed(setDispatchConfig(entryPointFn, workgroupSize, subgroupSize))) {
+      return failure();
+    }
+  }
   auto translationInfo = IREE::Codegen::TranslationInfoAttr::get(
       entryPointFn.getContext(), passPipeline, SymbolRefAttr(), pipelineConfig);
   return setTranslationInfo(entryPointFn, translationInfo);

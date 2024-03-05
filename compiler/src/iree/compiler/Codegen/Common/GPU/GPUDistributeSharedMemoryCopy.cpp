@@ -366,8 +366,8 @@ unrollSharedMemoryLoops(mlir::FunctionOpInterface funcOp,
 }
 
 LogicalResult gpuDistributeSharedMemoryCopy(mlir::FunctionOpInterface funcOp) {
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
-  if (failed(exportOp)) {
+  std::optional<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
+  if (!exportOp) {
     // We cannot do anything because we do not have the workgroup size
     // information, but the pass did not fail.
     return success();

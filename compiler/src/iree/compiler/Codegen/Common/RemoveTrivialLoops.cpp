@@ -111,8 +111,9 @@ class RemoveSingleIterationLoopPass final
     : public RemoveSingleIterationLoopBase<RemoveSingleIterationLoopPass> {
   void runOnOperation() override {
     auto funcOp = getOperation();
-    FailureOr<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
-    if (failed(exportOp))
+    std::optional<IREE::HAL::ExecutableExportOp> exportOp =
+        getEntryPoint(funcOp);
+    if (!exportOp)
       return;
 
     SmallVector<int64_t> workgroupSize = getWorkgroupSize(*exportOp);

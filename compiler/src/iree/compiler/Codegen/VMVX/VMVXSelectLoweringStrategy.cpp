@@ -50,25 +50,15 @@ public:
 } // namespace
 
 void VMVXSelectLoweringStrategyPass::runOnOperation() {
-  IREE::HAL::ExecutableVariantOp variantOp = getOperation();
-  ModuleOp moduleOp = variantOp.getInnerModule();
+  auto funcOp = getOperation();
 
   // Set the strategy with default heuristics.
-  if (failed(initVMVXLaunchConfig(moduleOp))) {
-    return signalPassFailure();
-  }
-
-  std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo =
-      getIdenticalTranslationInfo(variantOp);
-  if (!translationInfo) {
-    moduleOp.emitOpError(
-        "unhandled compilation of entry point functions with different "
-        "translation info");
+  if (failed(initVMVXLaunchConfig(funcOp))) {
     return signalPassFailure();
   }
 }
 
-std::unique_ptr<OperationPass<IREE::HAL::ExecutableVariantOp>>
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createVMVXSelectLoweringStrategyPass() {
   return std::make_unique<VMVXSelectLoweringStrategyPass>();
 }

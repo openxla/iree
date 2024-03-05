@@ -66,10 +66,10 @@ public:
 /// module.
 template <typename F>
 static LogicalResult
-verifyLoweringConfiguration(ModuleOp module,
+verifyLoweringConfiguration(FunctionOpInterface funcOp,
                             IREE::Codegen::TranslationInfoAttr translationInfo,
                             ArrayRef<int64_t> workgroupSize, F verificationFn) {
-  auto walkResult = module.walk([&](Operation *op) -> WalkResult {
+  auto walkResult = funcOp.walk([&](Operation *op) -> WalkResult {
     IREE::Codegen::LoweringConfigAttr loweringConfig = getLoweringConfig(op);
     if (!loweringConfig)
       return WalkResult::advance();
@@ -79,7 +79,7 @@ verifyLoweringConfiguration(ModuleOp module,
 }
 
 static LogicalResult
-verifyEntryPoint(ModuleOp moduleOp,
+verifyEntryPoint(FunctionOpInterface funcOp,
                  IREE::Codegen::TranslationInfoAttr translationInfo,
                  IREE::HAL::ExecutableExportOp exportOp) {
   std::optional<mlir::ArrayAttr> workgroupSizeAttr =
@@ -90,38 +90,36 @@ verifyEntryPoint(ModuleOp moduleOp,
     for (auto [index, attr] : llvm::enumerate(workgroupSizeAttr.value())) {
       workgroupSizes[index] = llvm::cast<IntegerAttr>(attr).getInt();
     }
-    return verifyLoweringConfiguration(moduleOp, translationInfo,
-                                       workgroupSizes, verifyGPUMatmulPipeline);
+    return verifyLoweringConfiguration(funcOp, translationInfo, workgroupSizes,
+                                       verifyGPUMatmulPipeline);
   }
   return success();
 }
 
 void LLVMGPUSelectLoweringStrategyPass::runOnOperation() {
-  IREE::HAL::ExecutableVariantOp variantOp = getOperation();
-  ModuleOp moduleOp = variantOp.getInnerModule();
+  auto funcOp = getOperation();
 
-  if (failed(initGPULaunchConfig(moduleOp))) {
+  if (failed(initGPULaunchConfig(funcOp))) {
     return signalPassFailure();
   }
 
-  std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo =
-      getIdenticalTranslationInfo(variantOp);
+  IREE::Codegen::TranslationInfoAttr translationInfo =
+      getTranslationInfo(funcOp);
   if (!translationInfo) {
-    moduleOp.emitOpError(
-        "unhandled compilation of entry point functions with different "
-        "translation info");
-    return signalPassFailure();
+    // Dont do anything if translation info is not set.
+    return;
   }
 
   // Verify the properties of each entry point based on the target pipeline.
-  for (auto exportOp : variantOp.getExportOps()) {
-    if (failed(verifyEntryPoint(moduleOp, translationInfo.value(), exportOp))) {
+  auto exportOp = getEntryPoint(funcOp);
+  if (exportOp) {
+    if (failed(verifyEntryPoint(funcOp, translationInfo, exportOp.value()))) {
       return signalPassFailure();
     }
   }
 }
 
-std::unique_ptr<OperationPass<IREE::HAL::ExecutableVariantOp>>
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createLLVMGPUSelectLoweringStrategyPass() {
   return std::make_unique<LLVMGPUSelectLoweringStrategyPass>();
 }

@@ -30,25 +30,17 @@ public:
   }
 
   void runOnOperation() override {
-    IREE::HAL::ExecutableVariantOp variantOp = getOperation();
-    ModuleOp moduleOp = variantOp.getInnerModule();
+    auto funcOp = getOperation();
 
-    if (failed(initROCDLLaunchConfig(moduleOp))) {
-      return signalPassFailure();
-    }
-
-    std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo =
-        getIdenticalTranslationInfo(variantOp);
-    if (!translationInfo) {
-      moduleOp.emitError(
-          "unsupported entry point functions with different translation info");
+    if (failed(initROCDLLaunchConfig(funcOp))) {
+      funcOp.emitOpError("failed to set configuration");
       return signalPassFailure();
     }
   }
 };
 } // namespace
 
-std::unique_ptr<OperationPass<IREE::HAL::ExecutableVariantOp>>
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createROCDLSelectLoweringStrategyPass() {
   return std::make_unique<ROCDLSelectLoweringStrategyPass>();
 }

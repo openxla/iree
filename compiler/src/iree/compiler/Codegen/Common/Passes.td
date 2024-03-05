@@ -26,7 +26,7 @@ def BubbleUpOrdinalOps : Pass<"iree-codegen-bubble-up-ordinal-ops", ""> {
 }
 
 def BufferizeCopyOnlyDispatches :
-  Pass<"iree-codegen-bufferize-copy-only-dispatches", "ModuleOp"> {
+  InterfacePass<"iree-codegen-bufferize-copy-only-dispatches", "mlir::FunctionOpInterface"> {
   let summary =
       "Bufferize dispatches that copy to/from interfaces to convert to a linalg.copy op";
   let constructor = "mlir::iree_compiler::createBufferizeCopyOnlyDispatchesPass()";
@@ -47,13 +47,13 @@ def ConcretizePadResultShape :
   let constructor = "mlir::iree_compiler::createConcretizePadResultShapePass()";
 }
 
-def ConvertBf16ArithToF32 : Pass<"iree-convert-bf16-arith-to-f32", "ModuleOp"> {
+def ConvertBf16ArithToF32 : Pass<"iree-convert-bf16-arith-to-f32", ""> {
   let summary = "Convert bf16 arithmetic operations to f32";
   let constructor = "mlir::iree_compiler::createConvertBf16ArithToF32Pass()";
 }
 
 def ConvertBf16ToUInt16Buffers :
-    Pass<"iree-convert-bf16-to-uint16-buffers", "ModuleOp"> {
+    Pass<"iree-convert-bf16-to-uint16-buffers", ""> {
   let summary = "Convert bf16 buffers to uint16 equivalents";
   let constructor = "mlir::iree_compiler::createConvertBf16ToUInt16BuffersPass()";
 }
@@ -179,13 +179,13 @@ def ReplaceSlowMinMaxOps
 }
 
 def EliminateEmptyTensors :
-    Pass<"iree-eliminate-empty-tensors", "ModuleOp"> {
+    InterfacePass<"iree-eliminate-empty-tensors", "mlir::FunctionOpInterface"> {
   let summary = "Eliminate tensor.empty ops to avoid buffer allocations";
   let constructor = "mlir::iree_compiler::createEliminateEmptyTensorsPass()";
 }
 
 def EmulateNarrowType :
-    Pass<"iree-codegen-emulate-narrow-type", "ModuleOp"> {
+    Pass<"iree-codegen-emulate-narrow-type", ""> {
   let summary = "Emulate narrow integer operations using wide integer operations";
   let constructor = "mlir::iree_compiler::createEmulateNarrowTypePass()";
 }
@@ -235,7 +235,7 @@ def ExtractAddressComputation: Pass<"extract-address-computation"> {
 }
 
 def FlattenMemRefSubspan :
-  Pass<"iree-codegen-flatten-memref-subspan", "ModuleOp"> {
+  InterfacePass<"iree-codegen-flatten-memref-subspan", "mlir::FunctionOpInterface"> {
   let summary =
       "Flatten n-D MemRef subspan ops to 1-D ones and fold byte offsets";
   let constructor = "mlir::iree_compiler::createFlattenMemRefSubspanPass()";
@@ -315,7 +315,7 @@ def HoistStaticallyBoundAllocations :
 }
 
 def IREEComprehensiveBufferize :
-    Pass<"iree-codegen-iree-comprehensive-bufferize", "ModuleOp"> {
+    InterfacePass<"iree-codegen-iree-comprehensive-bufferize", "mlir::FunctionOpInterface"> {
   let summary = "Convert from to Linalg ops on tensors to buffers";
   let constructor = "mlir::iree_compiler::createIREEComprehensiveBufferizePass()";
   let options = [
@@ -452,7 +452,7 @@ def TestPartitionableLoopsInterface :
 }
 
 def TileAndDistributeToWorkgroups :
-    Pass<"iree-codegen-tile-and-distribute-to-workgroups", "IREE::HAL::ExecutableVariantOp"> {
+    InterfacePass<"iree-codegen-tile-and-distribute-to-workgroups", "mlir::FunctionOpInterface"> {
   let summary = "Tile and distribute operations to workgroups";
   let constructor = "mlir::iree_compiler::createTileAndDistributeToWorkgroupsPass()";
   let options = [
@@ -489,6 +489,11 @@ def TypePropagation :
     InterfacePass<"iree-codegen-type-propagation", "mlir::FunctionOpInterface"> {
   let summary = "Propogate the type of tensor to avoid load/stores of illegal bit widths";
   let constructor = "mlir::iree_compiler::createTypePropagationPass()";
+}
+
+def TESTREWRITE : Pass<"test-rewrite", "IREE::HAL::ExecutableOp"> {
+  let summary = "DO NOT SUBMIT";
+  let constructor = "mlir::iree_compiler::createTESTREWRITEPass()";
 }
 
 #endif // IREE_CODEGEN_COMMON_PASSES

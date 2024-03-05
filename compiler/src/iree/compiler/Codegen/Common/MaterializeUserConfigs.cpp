@@ -66,6 +66,15 @@ runTransformConfigurationStrategy(Operation *payloadRoot,
   return StrategyRunResult::Success;
 }
 
+static llvm::StringMap<IREE::HAL::ExecutableExportOp>
+getAllEntryPoints(IREE::HAL::ExecutableVariantOp variantOp) {
+  llvm::StringMap<IREE::HAL::ExecutableExportOp> exportOps;
+  for (auto op : variantOp.getExportOps()) {
+    exportOps[op.getSymName()] = op;
+  }
+  return exportOps;
+}
+
 struct MaterializeUserConfigsPass
     : public MaterializeUserConfigsBase<MaterializeUserConfigsPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -74,10 +83,9 @@ struct MaterializeUserConfigsPass
 
   void runOnOperation() override {
     IREE::HAL::ExecutableVariantOp variantOp = getOperation();
-    ModuleOp moduleOp = variantOp.getInnerModule();
     llvm::StringMap<IREE::HAL::ExecutableExportOp> exportOps =
-        getAllEntryPoints(moduleOp);
-    MLIRContext *context = moduleOp.getContext();
+        getAllEntryPoints(variantOp);
+    MLIRContext *context = variantOp.getContext();
 
     // Parse the file path and kernel config strategy from flags. There are
     // two possible usage flows for transform dialect libraries.
@@ -148,6 +156,7 @@ struct MaterializeUserConfigsPass
       }
     }
 
+    ModuleOp moduleOp = variantOp.getInnerModule();
     LDBG("--start iterating over: "
          << std::distance(moduleOp.getOps<mlir::FunctionOpInterface>().begin(),
                           moduleOp.getOps<mlir::FunctionOpInterface>().end())
@@ -160,7 +169,7 @@ struct MaterializeUserConfigsPass
       }
 
       /// Nothing to do if the export already has a config.
-      if (getTranslationInfo(exportOp)) {
+      if (getTranslationInfo(funcOp)) {
         continue;
       }
 
@@ -189,27 +198,9 @@ struct MaterializeUserConfigsPass
       return;
     }
 
-    // From now on, we know we have a transform dialect strategy. We now need to
-    // ensure it can resolve and apply in a subsequent interpreter pass or else
-    // we need to fall back to codegen.
-    bool failedToResolve = false;
-    auto g = llvm::make_scope_exit([&]() {
-      if (!failedToResolve)
-        return;
-
-      exportOps = getAllEntryPoints(variantOp.getInnerModule());
-      for (auto &it : exportOps) {
-        auto exportOp = it.second;
-        if (getTranslationInfo(exportOp) == translationInfo) {
-          exportOp->removeAttr(kTranslationInfoAttrName);
-        }
-      }
-    });
-
     std::optional<SymbolRefAttr> strategyName =
         translationInfo.value().getCodegenSpec();
     if (!strategyName || *strategyName == SymbolRefAttr()) {
-      failedToResolve = true;
       return;
     }
 
@@ -220,7 +211,6 @@ struct MaterializeUserConfigsPass
         !transform::detail::findTransformEntryPoint(
             variantOp, *transformLibrary, entryPoint)) {
       moduleOp.emitOpError("failed to find transform strategy symbol");
-      failedToResolve = true;
     }
   }
 

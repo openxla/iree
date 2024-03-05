@@ -57,10 +57,10 @@ public:
 /// module.
 template <typename F>
 static LogicalResult
-verifyLoweringConfiguration(ModuleOp module,
+verifyLoweringConfiguration(FunctionOpInterface funcOp,
                             IREE::Codegen::TranslationInfoAttr translationInfo,
                             ArrayRef<int64_t> workgroupSize, F verificationFn) {
-  auto walkResult = module.walk([&](Operation *op) -> WalkResult {
+  auto walkResult = funcOp.walk([&](Operation *op) -> WalkResult {
     IREE::Codegen::LoweringConfigAttr loweringConfig = getLoweringConfig(op);
     if (!loweringConfig)
       return WalkResult::advance();
@@ -70,7 +70,7 @@ verifyLoweringConfiguration(ModuleOp module,
 }
 
 static LogicalResult
-verifyEntryPoint(ModuleOp moduleOp,
+verifyEntryPoint(FunctionOpInterface funcOp,
                  IREE::Codegen::TranslationInfoAttr translationInfo,
                  IREE::HAL::ExecutableExportOp exportOp) {
   if (translationInfo.getDispatchLoweringPassPipeline() ==
@@ -82,7 +82,7 @@ verifyEntryPoint(ModuleOp moduleOp,
   std::optional<mlir::ArrayAttr> workgroupSizeAttr =
       exportOp.getWorkgroupSize();
   if (!workgroupSizeAttr || workgroupSizeAttr->size() != 3) {
-    return moduleOp.emitError(
+    return funcOp.emitOpError(
         "expected workgroup size to have three dimensions for SPIR-V "
         "pipelines");
   }
@@ -94,16 +94,15 @@ verifyEntryPoint(ModuleOp moduleOp,
 
   switch (translationInfo.getDispatchLoweringPassPipeline()) {
   case CodeGenPipeline::SPIRVBaseVectorize:
-    return verifyLoweringConfiguration(moduleOp, translationInfo,
-                                       workgroupSizes,
+    return verifyLoweringConfiguration(funcOp, translationInfo, workgroupSizes,
                                        verifySPIRVBaseVectorizePassPipeline);
   case CodeGenPipeline::SPIRVMatmulPromoteVectorize:
     return verifyLoweringConfiguration(
-        moduleOp, translationInfo, workgroupSizes,
+        funcOp, translationInfo, workgroupSizes,
         verifySPIRVMatmulPromoteVectorizePassPipeline);
   case CodeGenPipeline::SPIRVCooperativeMatrixVectorize:
     return verifyLoweringConfiguration(
-        moduleOp, translationInfo, workgroupSizes,
+        funcOp, translationInfo, workgroupSizes,
         verifySPIRVCooperativeMatrixVectorizePassPipeline);
   default:
     break;
@@ -112,31 +111,31 @@ verifyEntryPoint(ModuleOp moduleOp,
 }
 
 void SPIRVSelectLoweringStrategyPass::runOnOperation() {
-  IREE::HAL::ExecutableVariantOp variantOp = getOperation();
-  ModuleOp moduleOp = variantOp.getInnerModule();
+  auto funcOp = getOperation();
 
-  if (failed(initSPIRVLaunchConfig(moduleOp))) {
+  if (failed(initSPIRVLaunchConfig(funcOp))) {
     return signalPassFailure();
   }
 
-  std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo =
-      getIdenticalTranslationInfo(variantOp);
+  auto translationInfo = getTranslationInfo(funcOp);
   if (!translationInfo) {
-    moduleOp.emitOpError(
-        "unhandled compilation of entry point functions with different "
-        "translation info");
+    return;
+  }
+
+  auto exportOp = getEntryPoint(funcOp);
+  if (!exportOp) {
+    funcOp.emitOpError(
+        "Currently selection only supported for entry point functions");
     return signalPassFailure();
   }
 
   // Verify the properties of each entry point based on the target pipeline.
-  for (auto exportOp : variantOp.getExportOps()) {
-    if (failed(verifyEntryPoint(moduleOp, translationInfo.value(), exportOp))) {
-      return signalPassFailure();
-    }
+  if (failed(verifyEntryPoint(funcOp, translationInfo, exportOp.value()))) {
+    return signalPassFailure();
   }
 }
 
-std::unique_ptr<OperationPass<IREE::HAL::ExecutableVariantOp>>
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createSPIRVSelectLoweringStrategyPass() {
   return std::make_unique<SPIRVSelectLoweringStrategyPass>();
 }

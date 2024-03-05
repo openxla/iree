@@ -41,7 +41,7 @@ def SPIRVDistribute : InterfacePass<"iree-spirv-distribute", "mlir::FunctionOpIn
 }
 
 def SPIRVEmulateI64 :
-    Pass<"iree-spirv-emulate-i64", "ModuleOp"> {
+    InterfacePass<"iree-spirv-emulate-i64", "mlir::FunctionOpInterface"> {
   let summary = "Emulate 64-bit integer ops with 32-bit integer ops";
   let constructor = "mlir::iree_compiler::createSPIRVEmulateI64Pass()";
 }
@@ -71,8 +71,8 @@ def SPIRVLinkExecutables :
 }
 
 def SPIRVLowerExecutableTarget :
-    Pass<"iree-spirv-lower-executable-target-pass",
-         "mlir::iree_compiler::IREE::HAL::ExecutableVariantOp"> {
+    InterfacePass<"iree-spirv-lower-executable-target-pass",
+         "mlir::FunctionOpInterface"> {
   let summary = "Lower the executable target to SPIR-V using one of the "
                 "IREE::HAL::DispatchLoweringPassPipeline";
   let constructor =
@@ -95,8 +95,8 @@ def SPIRVMaterializeExecutableConditions :
 }
 
 def SPIRVSelectLoweringStrategy :
-    Pass<"iree-spirv-select-lowering-strategy-pass",
-         "mlir::iree_compiler::IREE::HAL::ExecutableVariantOp"> {
+    InterfacePass<"iree-spirv-select-lowering-strategy-pass",
+         "mlir::FunctionOpInterface"> {
   let summary = "Select the IREE::HAL::DispatchLoweringPassPipeline for lowering"
                 "to SPIR-V";
   let constructor =
@@ -147,7 +147,7 @@ def SPIRVTrimExecutableTargetEnv :
 }
 
 def SPIRVVectorizeLoadStore :
-    Pass<"iree-spirv-vectorize-load-store", "ModuleOp"> {
+    InterfacePass<"iree-spirv-vectorize-load-store", "mlir::FunctionOpInterface"> {
   let summary = "Vectorize load/store of memrefs for better memory access";
   let constructor = "mlir::iree_compiler::createSPIRVVectorizeLoadStore()";
 }

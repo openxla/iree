@@ -83,9 +83,9 @@ transform_dialect::MapNestedForallToGpuThreadsOp::applyToOne(
     transform::TransformRewriter &rewriter, mlir::FunctionOpInterface target,
     transform::ApplyToEachResultList &results,
     transform::TransformState &state) {
-  FailureOr<IREE::HAL::ExecutableExportOp> maybeExportOp =
+  std::optional<IREE::HAL::ExecutableExportOp> maybeExportOp =
       getEntryPoint(target);
-  if (failed(maybeExportOp)) {
+  if (!maybeExportOp) {
     state.getTopLevel()->emitOpError("no IREE::HAL::ExecutableExportOp found");
     return emitDefaultDefiniteFailure(target);
   }
@@ -273,22 +273,6 @@ rewriteScfIfAsWarpExecuteOnLane0(RewriterBase &rewriter, Location loc,
   return VectorDistributionResult{warpOp};
 }
 
-// TODO: Refactor in a generic util that can be reused.
-static HAL::ExecutableExportOp
-getExecutableExportOpForFunc(HAL::ExecutableVariantOp halExecutableVariantOp,
-                             mlir::FunctionOpInterface funcOp) {
-  if (!halExecutableVariantOp || !funcOp)
-    return {};
-  HAL::ExecutableExportOp exportOp;
-  halExecutableVariantOp->walk([&](HAL::ExecutableExportOp op) {
-    if (op.getSymName() != funcOp.getName())
-      return WalkResult::advance();
-    exportOp = op;
-    return WalkResult::interrupt();
-  });
-  return exportOp;
-}
-
 DiagnosedSilenceableFailure
 transform_dialect::VectorToWarpExecuteOnLane0Op::applyToOne(
     transform::TransformRewriter &rewriter, scf::IfOp target,
@@ -306,12 +290,9 @@ transform_dialect::VectorToWarpExecuteOnLane0Op::applyToOne(
               "pass assumptions.";
   }
 
-  auto halExecutableVariantOp =
-      target->getParentOfType<HAL::ExecutableVariantOp>();
   auto funcOp = target->getParentOfType<mlir::FunctionOpInterface>();
-  HAL::ExecutableExportOp exportOp =
-      getExecutableExportOpForFunc(halExecutableVariantOp, funcOp);
-  if (!halExecutableVariantOp || !funcOp || !exportOp) {
+  std::optional<HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
+  if (!exportOp) {
     // Return a silenceable failure and set the expected 1 result to
     // nullptr.
     results.assign(1, nullptr);
@@ -320,7 +301,7 @@ transform_dialect::VectorToWarpExecuteOnLane0Op::applyToOne(
               "applied";
   }
 
-  std::optional<ArrayAttr> maybeAttr = exportOp.getWorkgroupSize();
+  std::optional<ArrayAttr> maybeAttr = exportOp->getWorkgroupSize();
   // TODO: Pervasive 3 constant in IREE.
   if (!maybeAttr || maybeAttr->size() != 3) {
     // Return a silenceable failure and set the expected 1 result to
@@ -604,9 +585,9 @@ transform_dialect::VectorWarpDistributionOp::applyToOne(
     transform::TransformRewriter &rewriter, mlir::FunctionOpInterface target,
     transform::ApplyToEachResultList &results,
     transform::TransformState &state) {
-  FailureOr<IREE::HAL::ExecutableExportOp> maybeExportOp =
+  std::optional<IREE::HAL::ExecutableExportOp> maybeExportOp =
       getEntryPoint(target);
-  if (failed(maybeExportOp)) {
+  if (!maybeExportOp) {
     state.getTopLevel()->emitOpError("no IREE::HAL::ExecutableExportOp found");
     return emitDefaultDefiniteFailure(target);
   }
