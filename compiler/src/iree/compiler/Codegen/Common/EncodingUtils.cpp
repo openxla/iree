@@ -9,10 +9,63 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
 
+#include "llvm/Support/Debug.h"
+
 namespace mlir::iree_compiler {
 
 using IREE::LinalgExt::EncodingAttr;
 using IREE::LinalgExt::EncodingRole;
+
+std::string str(SmallVector<int64_t> v) {
+  std::stringstream ss;
+  ss << "[ " << v[0];
+  for (int i = 1; i < v.size(); ++i) {
+    ss << " " << v[i];
+  }
+  ss << " ]";
+  return ss.str();
+}
+
+static SmallVector<int64_t> reversed(ArrayRef<int64_t> v) {
+  SmallVector<int64_t> result(v.size());
+  for (unsigned i = 0; i < v.size(); ++i)
+    result[v.size() - 1 - i] = v[i];
+  return result;
+}
+
+static RankedTensorType getTransposedType(RankedTensorType tensorType) {
+  SmallVector<int64_t> transposedShape = reversed(tensorType.getShape());
+  IREE::LinalgExt::EncodingAttr encoding =
+      tensorType.getEncoding()
+          .dyn_cast_or_null<IREE::LinalgExt::EncodingAttr>();
+  if (encoding) {
+    auto transposedRole = encoding.getRole().getValue();
+    if (encoding.getRole().getValue() == IREE::LinalgExt::EncodingRole::LHS) {
+      transposedRole = IREE::LinalgExt::EncodingRole::RHS;
+    }
+    if (encoding.getRole().getValue() == IREE::LinalgExt::EncodingRole::RHS) {
+      transposedRole = IREE::LinalgExt::EncodingRole::LHS;
+    }
+    TypeAttr originalTypeAttr = encoding.getOriginalType();
+    TypeAttr transposedOriginalTypeAttr;
+    if (originalTypeAttr) {
+      RankedTensorType originalType = getTransposedType(
+          originalTypeAttr.getValue().cast<RankedTensorType>());
+      transposedOriginalTypeAttr = TypeAttr::get(originalType);
+    }
+    auto transposedEncoding = IREE::LinalgExt::EncodingAttr::get(
+        encoding.getContext(),
+        IREE::LinalgExt::EncodingRoleAttr::get(encoding.getContext(),
+                                               transposedRole),
+        encoding.getElementTypes(), transposedOriginalTypeAttr,
+        encoding.getMatmulNarrow_N(), encoding.getMatmulNarrow_M(),
+        encoding.getUserIndexingMaps());
+    return RankedTensorType::get(transposedShape, tensorType.getElementType(),
+                                 transposedEncoding);
+  } else {
+    return RankedTensorType::get(transposedShape, tensorType.getElementType());
+  }
+}
 
 /// For a given tensor type with an encoding, return the materialized
 /// type to use for it. If no encoding is set, then return the tensor type
@@ -25,13 +78,43 @@ getMaterializedType(RankedTensorType tensorType,
   if (failed(materializeEncodingInfo)) {
     return dropEncoding(tensorType);
   }
-  return tensor::PackOp::inferPackedType(
-             getOriginalTypeWithEncoding(tensorType)
-                 .clone(tensorType.getElementType()),
-             materializeEncodingInfo->innerTileSizes,
-             materializeEncodingInfo->innerDimsPos,
-             materializeEncodingInfo->outerDimsPerm)
-      .cast<RankedTensorType>();
+  llvm::dbgs() << "\n\n\n--------------------------------------------------"
+                  "\nTYPE CONVERTER:\n\n\nMaterializeEncodingInfo:\n"
+               << "> innerTileSizes"
+               << str(materializeEncodingInfo->innerTileSizes) << "\n"
+               << "> innerDimsPos" << str(materializeEncodingInfo->innerDimsPos)
+               << "\n"
+               << "> outerDimsPerm"
+               << str(materializeEncodingInfo->outerDimsPerm) << "\n\n\n"
+               << "FROM:\n\n"
+               << tensorType << "\n\n";
+  IREE::LinalgExt::EncodingAttr encoding =
+      tensorType.getEncoding()
+          .dyn_cast_or_null<IREE::LinalgExt::EncodingAttr>();
+  if (encoding) {
+    int64_t matmulNarrowM = getIntOrZero(encoding.getMatmulNarrow_M());
+    int64_t matmulNarrowN = getIntOrZero(encoding.getMatmulNarrow_N());
+    bool transpose =
+        matmulNarrowN && (!matmulNarrowM || matmulNarrowM > matmulNarrowN) &&
+        encoding.getRole().getValue() == IREE::LinalgExt::EncodingRole::RESULT;
+    if (transpose) {
+      llvm::dbgs() << " ...!!!!!! TRANSPOSE !!!!!!...\n";
+      return getMaterializedType(getTransposedType(tensorType),
+                                 materializeEncodingFn);
+    }
+  }
+
+  auto resultType =
+      tensor::PackOp::inferPackedType(getOriginalTypeWithEncoding(tensorType)
+                                          .clone(tensorType.getElementType()),
+                                      materializeEncodingInfo->innerTileSizes,
+                                      materializeEncodingInfo->innerDimsPos,
+                                      materializeEncodingInfo->outerDimsPerm)
+          .cast<RankedTensorType>();
+  llvm::dbgs() << "TO:\n\n"
+               << resultType
+               << "\n\n---------------------------------------\n\n";
+  return resultType;
 }
 
 MaterializeEncodingTypeConverter::MaterializeEncodingTypeConverter(
