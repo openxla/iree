@@ -110,34 +110,83 @@ getSPIRVTargetEnv(const std::string &vulkanTargetTripleOrEnv,
   return {};
 }
 
+// TODO: VulkanOptions for choosing the Vulkan version and extensions/features.
+class VulkanTargetDevice : public TargetDevice {
+public:
+  VulkanTargetDevice(VulkanSPIRVTargetOptions options)
+      : options_(std::move(options)) {}
+
+  IREE::HAL::DeviceTargetAttr
+  getDefaultDeviceTarget(MLIRContext *context,
+                         const TargetRegistry &targetRegistry) const override {
+    Builder b(context);
+    SmallVector<NamedAttribute> configItems;
+
+    auto configAttr = b.getDictionaryAttr(configItems);
+
+    SmallVector<IREE::HAL::ExecutableTargetAttr> executableTargetAttrs;
+    targetRegistry.getTargetBackend("vulkan-spirv")
+        ->getDefaultExecutableTargets(context, "vulkan", configAttr,
+                                      executableTargetAttrs);
+
+    return IREE::HAL::DeviceTargetAttr::get(context, b.getStringAttr("vulkan"),
+                                            configAttr, executableTargetAttrs);
+  }
+
+private:
+  VulkanSPIRVTargetOptions options_;
+};
+
 class VulkanSPIRVTargetBackend : public TargetBackend {
 public:
   VulkanSPIRVTargetBackend(VulkanSPIRVTargetOptions options)
       : options_(std::move(options)) {}
 
-  // NOTE: we could vary these based on the options such as 'vulkan-v1.1'.
-  std::string name() const override { return "vulkan"; }
+  std::string getLegacyDefaultDeviceID() const override { return "vulkan"; }
+
+  void getDefaultExecutableTargets(
+      MLIRContext *context, StringRef deviceID, DictionaryAttr deviceConfigAttr,
+      SmallVectorImpl<IREE::HAL::ExecutableTargetAttr> &executableTargetAttrs)
+      const override {
+    // Select SPIR-V environments to compile for.
+    for (std::string targetTripleOrEnv : options_.targetTriplesAndEnvs) {
+      executableTargetAttrs.push_back(getExecutableTarget(
+          context, getSPIRVTargetEnv(targetTripleOrEnv, context),
+          options_.indirectBindings));
+    }
+
+    // If no environment specified, populate with a minimal target.
+    if (executableTargetAttrs.empty()) {
+      executableTargetAttrs.push_back(getExecutableTarget(
+          context, getSPIRVTargetEnv("unknown-unknown-unknown", context),
+          options_.indirectBindings));
+    }
+  }
+
+  IREE::HAL::ExecutableTargetAttr
+  getExecutableTarget(MLIRContext *context, spirv::TargetEnvAttr targetEnv,
+                      bool indirectBindings) const {
+    Builder b(context);
+    SmallVector<NamedAttribute> configItems;
+    auto addConfig = [&](StringRef name, Attribute value) {
+      configItems.emplace_back(b.getStringAttr(name), value);
+    };
+
+    addConfig(spirv::getTargetEnvAttrName(), targetEnv);
+    if (indirectBindings) {
+      addConfig("hal.bindings.indirect", b.getUnitAttr());
+    }
+
+    return IREE::HAL::ExecutableTargetAttr::get(
+        context, b.getStringAttr("vulkan-spirv"),
+        indirectBindings ? b.getStringAttr("vulkan-spirv-fb-ptr")
+                         : b.getStringAttr("vulkan-spirv-fb"),
+        b.getDictionaryAttr(configItems));
+  }
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<IREE::Codegen::IREECodegenDialect, Vulkan::VulkanDialect,
                     spirv::SPIRVDialect, gpu::GPUDialect>();
-  }
-
-  IREE::HAL::DeviceTargetAttr
-  getDefaultDeviceTarget(MLIRContext *context) const override {
-    Builder b(context);
-    SmallVector<NamedAttribute> configItems;
-
-    // Indicates that the runtime HAL driver operates only in the legacy
-    // synchronous mode.
-    configItems.emplace_back(b.getStringAttr("legacy_sync"), b.getUnitAttr());
-
-    configItems.emplace_back(b.getStringAttr("executable_targets"),
-                             getExecutableTargets(context));
-
-    auto configAttr = b.getDictionaryAttr(configItems);
-    return IREE::HAL::DeviceTargetAttr::get(
-        context, b.getStringAttr(deviceID()), configAttr);
   }
 
   void buildConfigurationPassPipeline(IREE::HAL::ExecutableVariantOp variantOp,
@@ -393,59 +442,20 @@ public:
   }
 
 private:
-  ArrayAttr getExecutableTargets(MLIRContext *context) const {
-    SmallVector<Attribute> targetAttrs;
-
-    for (std::string targetTripleOrEnv : options_.targetTriplesAndEnvs) {
-      targetAttrs.push_back(getExecutableTarget(
-          context, getSPIRVTargetEnv(targetTripleOrEnv, context),
-          options_.indirectBindings));
-    }
-
-    // If no environment specified, populate with a minimal target.
-    if (targetAttrs.empty()) {
-      targetAttrs.push_back(getExecutableTarget(
-          context, getSPIRVTargetEnv("unknown-unknown-unknown", context),
-          options_.indirectBindings));
-    }
-    return ArrayAttr::get(context, targetAttrs);
-  }
-
-  IREE::HAL::ExecutableTargetAttr
-  getExecutableTarget(MLIRContext *context, spirv::TargetEnvAttr targetEnv,
-                      bool indirectBindings) const {
-    Builder b(context);
-    SmallVector<NamedAttribute> configItems;
-
-    configItems.emplace_back(b.getStringAttr(spirv::getTargetEnvAttrName()),
-                             targetEnv);
-    if (indirectBindings) {
-      configItems.emplace_back(b.getStringAttr("hal.bindings.indirect"),
-                               UnitAttr::get(context));
-    }
-
-    auto configAttr = b.getDictionaryAttr(configItems);
-    return IREE::HAL::ExecutableTargetAttr::get(
-        context, b.getStringAttr("vulkan"),
-        indirectBindings ? b.getStringAttr("vulkan-spirv-fb-ptr")
-                         : b.getStringAttr("vulkan-spirv-fb"),
-        configAttr);
-  }
-
   VulkanSPIRVTargetOptions options_;
 };
 
 void registerVulkanSPIRVTargetBackends(
     std::function<VulkanSPIRVTargetOptions()> queryOptions) {
   getVulkanSPIRVTargetOptionsFromFlags();
-  auto backendFactory = [=]() {
-    return std::make_shared<VulkanSPIRVTargetBackend>(queryOptions());
-  };
   // #hal.device.target<"vulkan", ...
-  static TargetBackendRegistration registration0("vulkan", backendFactory);
+  static TargetDeviceRegistration registration0("vulkan", [=]() {
+    return std::make_shared<VulkanTargetDevice>(queryOptions());
+  });
   // #hal.executable.target<"vulkan-spirv", ...
-  static TargetBackendRegistration registration1("vulkan-spirv",
-                                                 backendFactory);
+  static TargetBackendRegistration registration1("vulkan-spirv", [=]() {
+    return std::make_shared<VulkanSPIRVTargetBackend>(queryOptions());
+  });
 }
 
 } // namespace mlir::iree_compiler::IREE::HAL

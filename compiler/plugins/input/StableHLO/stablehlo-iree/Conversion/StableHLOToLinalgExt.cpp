@@ -11,10 +11,10 @@
 #include <complex>
 #include <memory>
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtDialect.h"
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowDialect.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtDialect.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -451,13 +451,11 @@ struct ReverseOpConversion final
 // ScanOp
 //===----------------------------------------------------------------------===//
 
-static bool checkUnary(DenseIntElementsAttr attr) {
-  llvm::SmallVector<int64_t> values;
-  values = extract1DVector(attr);
-
-  bool result = true;
+static bool checkUnary(const ArrayRef<int64_t> &values) {
   for (auto value : values) {
-    result = result && (value == 1);
+    if (value != 1) {
+      return false;
+    }
   }
   return true;
 }
@@ -490,7 +488,7 @@ struct ScanOpConversion final
     auto init0 = op.getInitValues().front();
     auto init0Ty = init0.getType().cast<ShapedType>();
 
-    auto window = extract1DVector(op.getWindowDimensions());
+    auto window = llvm::to_vector(op.getWindowDimensions());
     llvm::SmallVector<int64_t, 4> reduceAxes;
     for (int i = 0, s = window.size(); i < s; ++i) {
       if (window[i] == 1)

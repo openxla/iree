@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree-dialects/Dialect/LinalgExt/Passes/Passes.h"
+#include "iree/compiler/Dialect/LinalgExt/Transforms/Passes.h"
 #include "iree-dialects/Dialect/LinalgTransform/Passes.h"
 #include "iree/compiler/Codegen/Common/CPU/Passes.h"
 #include "iree/compiler/Codegen/Common/Passes.h"
@@ -12,6 +12,7 @@
 #include "iree/compiler/Codegen/LLVMCPU/Passes.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
+#include "mlir/Conversion/ArithToArmSME/ArithToArmSME.h"
 #include "mlir/Conversion/ArmSMEToLLVM/ArmSMEToLLVM.h"
 #include "mlir/Conversion/ArmSMEToSCF/ArmSMEToSCF.h"
 #include "mlir/Conversion/ComplexToStandard/ComplexToStandard.h"
@@ -99,8 +100,6 @@ static void addTileAndDistributePasses(OpPassManager &pm) {
       createFuseTensorPadWithConsumerPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       createConcretizePadResultShapePass());
-  nestedModulePM.addNestedPass<func::FuncOp>(
-      IREE::LinalgExt::createTileAndDecomposeAttentionPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       IREE::LinalgExt::createTileAndDecomposeWinogradTransformPass());
 }
@@ -301,6 +300,10 @@ void buildLLVMCPUVectorLoweringPipeline(
   passManager.addNestedPass<func::FuncOp>(
       createLLVMCPUVectorTransposeLoweringPass(
           options.lowerVectorTransposeToAVX2));
+
+  // Potentially removes shape_cast and broadcast on unit dims before shape_cast
+  // lowering.
+  passManager.addNestedPass<func::FuncOp>(createCanonicalizerPass());
 
   // 'vector.shape_cast' are very expensive operations that are even generated
   // by some of the lowerings above (e.g., transpose lowering). There are
@@ -512,13 +515,14 @@ void addMmt4dTilingExpertPassPipeline(OpPassManager &passManager,
     nestedModulePM.addPass(
         createCPULowerToUKernelsPass(clSkipIntermediateRoundings));
   }
+
   // We still run codegen pipeline because we want a better fallback when
   // ukernels are not available. They are nop if the mmt4d op is convereted to
   // ukernels. If ukernels are not implemented, the lowering config is still
   // carried by compute ops, so we can use it as a fallback solution.
 
   // Apply tile and fuse to all the non-distribution fusable levels. Skip
-  // distribution level as that level has been fused already.
+  // distribution level as such a level has been fused already.
   SmallVector<int64_t> allFusableLevels(tilingConfig.getFusableLevels());
   if (allFusableLevels.size() > 1) {
     llvm::SmallSetVector<int64_t, 4> fusableLevels(allFusableLevels.begin(),
@@ -596,16 +600,46 @@ void addCPUDataTilingPipeline(OpPassManager &passManager,
   }
 }
 
+void addCPULinalgExtTileAndVectorizePipeline(OpPassManager &passManager,
+                                             TilingConfig &tilingConfig) {
+  addTileAndDistributePasses(passManager);
+  OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createLLVMCPUTilePass(tilingConfig.getVectorCommonParallelLevel()));
+  // TODO: Should only apply decomposition here?
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      IREE::LinalgExt::createTileAndDecomposeAttentionPass());
+
+  {
+    GenericVectorizationPassOptions options;
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createGenericVectorizationPass(options));
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createOptimizeTensorInsertExtractSlicesPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
+    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
+  }
+
+  addCPUBufferizePasses(nestedModulePM);
+
+  {
+    LLVMCPUVectorLoweringPassOptions options;
+    options.splitVectorTransfersTo = "linalg-copy";
+    buildLLVMCPUVectorLoweringPipeline(nestedModulePM, options);
+  }
+}
+
 void addCPUDefaultPassPipeline(OpPassManager &passManager) {
   addTileAndDistributePasses(passManager);
   OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
   addCPUBufferizePasses(nestedModulePM);
 }
 
-void addTransformDialectPasses(OpPassManager &passManager) {
+void addTransformDialectPasses(OpPassManager &passManager,
+                               StringRef entryPoint) {
   // Give control to the transform dialect.
   passManager.addPass(
-      mlir::iree_compiler::createTransformDialectInterpreterPass());
+      mlir::iree_compiler::createTransformDialectInterpreterPass(entryPoint));
   // Dropping the schedule is needed:
   //   1. if we want to embed the transform in the module: we should drop the
   //      schedule once applied.
@@ -657,7 +691,9 @@ static void addLowerToLLVMPasses(OpPassManager &passManager,
   }
 
   if (enableAArch64SME) {
-    // Lower vector operations to Arm SME operations.
+    // (Arith, Vector) -> ArmSME
+    passManager.addNestedPass<func::FuncOp>(
+        mlir::createArithToArmSMEConversionPass());
     passManager.addNestedPass<func::FuncOp>(
         mlir::createConvertVectorToArmSMEPass());
     passManager.addNestedPass<func::FuncOp>(
@@ -782,6 +818,11 @@ void registerCodegenLLVMCPUPasses() {
       [](OpPassManager &passManager) {
         buildLLVMCPUCodegenConfigurationPassPipeline(passManager);
       });
+
+  static PassPipelineRegistration<> LLVMCPUBufferizationPipeline(
+      "iree-codegen-llvmcpu-bufferization-pipeline",
+      "Runs the bufferization pipeline for CPU",
+      [](OpPassManager &passManager) { addCPUBufferizePasses(passManager); });
 
   static PassPipelineRegistration<> LLVMCPUVectorLoweringPipeline(
       "iree-codegen-llvmcpu-vector-lowering-pipeline",

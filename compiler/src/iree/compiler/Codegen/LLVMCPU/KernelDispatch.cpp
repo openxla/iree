@@ -6,7 +6,6 @@
 
 #include "iree/compiler/Codegen/LLVMCPU/KernelDispatch.h"
 
-#include "iree-dialects/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Codegen/Common/TileSizeSelection.h"
 #include "iree/compiler/Codegen/LLVMCPU/TargetMLTransformInfo.h"
 #include "iree/compiler/Codegen/LLVMCPU/Utils.h"
@@ -16,6 +15,7 @@
 #include "iree/compiler/Codegen/Utils/Utils.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -1365,6 +1365,9 @@ static TileSizesListType getMmt4dTileSizes(linalg::LinalgOp op) {
               : getMatmulTileSize(tileBytes, rhsType.getElementTypeBitWidth(),
                                   reductionSize, N0);
 
+  // Cache-level sizes are set to the distribution tile sizes for now. This will
+  // allow us to change distribution tile sizes while still preserving the
+  // existing cache behavior to some extent.
   unsigned numLoops = op.getNumLoops();
   SmallVector<int64_t> cacheParallelTileSizes =
       getDefaultDistributedLevelTileSizes(op, distConfig);
@@ -1509,6 +1512,21 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, op, tileSizesList,
       DispatchLoweringPassPipeline::CPUDataTiling);
+}
+
+static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
+                                   IREE::LinalgExt::AttentionOp attnOp) {
+  SmallVector<int64_t> distTileSizes = getDefaultDistributedLevelTileSizes(
+      attnOp, DistributionHeuristicConfig{});
+  int64_t iterationDomainRank = attnOp.getIterationDomainRank();
+  // There are some dimensions are not tiled. Set vector tile sizes being ones
+  // to avoid huge vectors.
+  // TODO: We should be able to tile other dimensions.
+  SmallVector<int64_t> vecTileSizes(iterationDomainRank, 1);
+  TileSizesListType tileSizes = {distTileSizes, vecTileSizes};
+  return setOpConfigAndEntryPointFnTranslation(
+      entryPointFn, attnOp, tileSizes,
+      DispatchLoweringPassPipeline::CPULinalgExtTileAndVectorize);
 }
 
 /// Sets the lowering configuration for dispatch region for linalg_ext.fft
@@ -2096,8 +2114,9 @@ setRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op,
           return setRootConfig(entryPointFn, op, LinalgOpInfo(op),
                                targetMLTransInfo);
         })
-        .Case<IREE::LinalgExt::FftOp, tensor::PackOp, tensor::PadOp,
-              tensor::UnPackOp, linalg::Mmt4DOp, linalg::BatchMmt4DOp>(
+        .Case<IREE::LinalgExt::AttentionOp, IREE::LinalgExt::FftOp,
+              tensor::PackOp, tensor::PadOp, tensor::UnPackOp, linalg::Mmt4DOp,
+              linalg::BatchMmt4DOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<linalg::Conv2DNhwcHwcfOp, linalg::Conv2DNchwFchwOp,
               linalg::PoolingNhwcSumOp, linalg::PoolingNhwcMaxOp,

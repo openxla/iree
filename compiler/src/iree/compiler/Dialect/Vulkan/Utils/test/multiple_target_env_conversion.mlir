@@ -1,4 +1,4 @@
-// RUN: iree-opt --pass-pipeline='builtin.module(iree-hal-assign-target-devices{targets=vulkan-spirv},iree-hal-transformation-pipeline{serialize-executables=false})' \
+// RUN: iree-opt --pass-pipeline='builtin.module(iree-hal-assign-target-devices{targetBackends=vulkan-spirv},iree-hal-transformation-pipeline{serialize-executables=false})' \
 // RUN:   --iree-vulkan-target-triple=rdna3-7900xtx-windows \
 // RUN:   --iree-vulkan-target-env="#vk.target_env<v1.1, r(120), [VK_KHR_spirv_1_4, VK_KHR_storage_buffer_storage_class], AMD:DiscreteGPU, #vk.caps<maxComputeSharedMemorySize = 16384, maxComputeWorkGroupInvocations = 1024, maxComputeWorkGroupSize = dense<[128, 8, 4]>: vector<3xi32>, subgroupFeatures = 63 : i32, subgroupSize = 4 >>" \
 // RUN:   --iree-vulkan-target-triple=valhall-unknown-android31 \
@@ -18,7 +18,7 @@
 
 // Verify that the order of target environments matches what the user specified.
 
-// CHECK: executable_targets = [#[[RDNA3]], #[[ENV]], #[[VALHALL]]]
+// CHECK: [#[[RDNA3]], #[[ENV]], #[[VALHALL]]]
 
 stream.executable public @reduce_dispatch {
   stream.executable.export @reduce_dispatch workgroups(%arg0: index) -> (index, index, index) {

@@ -79,9 +79,6 @@ iree_cc_library(
   DEPS
     ::PassHeaders
     ::PassesIncGen
-    IREELinalgExtDialect
-    IREELinalgExtPasses
-    IREELinalgExtTransforms
     IREELinalgTransformDialect
     IREELinalgTransformDialectPasses
     LLVMSupport
@@ -139,6 +136,7 @@ iree_cc_library(
     MLIRVectorTransforms
     iree::compiler::Codegen::Common
     iree::compiler::Codegen::Common::GPU::CommonGPUPasses
+    iree::compiler::Codegen::Common::GPU::GPUHeuristics
     iree::compiler::Codegen::Common::TransformDialectInterpreterPass
     iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
     iree::compiler::Codegen::TransformStrategies::GPU
@@ -147,6 +145,8 @@ iree_cc_library(
     iree::compiler::Dialect::Flow::IR
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::HAL::IR::HALDialect
+    iree::compiler::Dialect::LinalgExt::IR
+    iree::compiler::Dialect::LinalgExt::Transforms
     iree::compiler::Dialect::Util::IR
     iree::compiler::Dialect::Util::Transforms
     iree::compiler::Utils
