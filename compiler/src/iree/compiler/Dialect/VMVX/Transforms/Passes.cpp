@@ -40,9 +40,10 @@ void buildVMVXConfigurationPassPipeline(OpPassManager &passManager) {
   // Tensor-level optimization, kernel dispatch and lower to buffers.
   // ---------------------------------------------------------------------------
   addCommonTargetExecutablePreprocessingPasses(passManager);
-  FunctionLikeNest(passManager.nest<ModuleOp>()).addPass([&]() {
-    return createCPUMaterializeEncodingPass();
-  });
+
+  OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
+  nestedModulePM.addPass(createCPUMaterializeEncodingPass());
+
   // TODO: Remove the following pass the plumb support for #hal.descriptor_type
   // memory space through the stack.
   passManager.addPass(createEraseHALDescriptorTypeFromMemRefPass());

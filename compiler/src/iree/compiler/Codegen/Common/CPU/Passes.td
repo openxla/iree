@@ -14,13 +14,13 @@ include "mlir/Pass/PassBase.td"
 //===---------------------------------------------------------------------===//
 
 def CPUMaterializeEncoding :
-    InterfacePass<"iree-codegen-cpu-materialize-encoding", "mlir::FunctionOpInterface"> {
-  let summary = "Materialize the encoding for tensor as specified by the backend";
+    Pass<"iree-codegen-cpu-materialize-encoding", "mlir::ModuleOp"> {
+  let summary = "Materialize the encoding for tensor as specified by the backend.";
   let constructor = "mlir::iree_compiler::createCPUMaterializeEncodingPass()";
 }
 
 def CPUMaterializeUpperBoundTileSize :
-    InterfacePass<"iree-codegen-cpu-materialize-upper-bound-tile-size", "mlir::FunctionOpInterface"> {
+    Pass<"iree-codegen-cpu-materialize-upper-bound-tile-size", "mlir::ModuleOp"> {
   let summary = "Materialize upper_bound_tile_size to constants.";
   let constructor = "mlir::iree_compiler::createCPUMaterializeUpperBoundTileSizePass()";
 }

@@ -13,6 +13,7 @@
 #define IREE_COMPILER_CODEGEN_COMMON_CPU_PASSES_H_
 
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Pass/Pass.h"
 
@@ -22,9 +23,8 @@ namespace mlir::iree_compiler {
 ///   linalg_ext.set_encoding   -> tensor.pack
 ///   linalg_ext.unset_encoding -> tensor.unpack
 ///   linalg.matmul             -> linalg.mmt4d
-std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
-createCPUMaterializeEncodingPass(
-    IREE::HAL::ExecutableTargetAttr targetAttr = nullptr);
+std::unique_ptr<Pass>
+createCPUMaterializeEncodingPass();
 
 /// Like createLLVMCPUMaterializeEncodingPass, but specifically for
 /// linalg_ext.upper_bound_tile_size, converting it to constants.
@@ -41,9 +41,7 @@ createCPUMaterializeEncodingPass(
 /// converts upper_bound_tile_size to some specific constant size (currently 16)
 /// that is the largest tile size that we can use in VMVX, and can be adjusted
 // as needed.
-std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
-createCPUMaterializeUpperBoundTileSizePass(
-    ArrayRef<IREE::HAL::ExecutableTargetAttr> targetAttrs = {});
+std::unique_ptr<Pass> createCPUMaterializeUpperBoundTileSizePass();
 
 /// Adds CPU bufferization passes to the pipeline.
 void addCPUBufferizePasses(OpPassManager &passManager);

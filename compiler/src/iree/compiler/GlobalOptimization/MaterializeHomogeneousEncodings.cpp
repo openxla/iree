@@ -6,6 +6,7 @@
 
 #include "iree/compiler/Codegen/Common/CPU/Passes.h"
 #include "iree/compiler/Codegen/Common/Passes.h"
+#include "iree/compiler/Dialect/HAL/Analysis/DeviceAnalysis.h"
 #include "iree/compiler/Dialect/HAL/IR/HALDialect.h"
 #include "iree/compiler/Dialect/HAL/IR/HALOps.h"
 #include "iree/compiler/GlobalOptimization/PassDetail.h"
@@ -24,6 +25,39 @@ namespace mlir::iree_compiler::GlobalOptimization {
 
 using FunctionLikeNest =
     MultiOpNest<IREE::Util::InitializerOp, IREE::Util::FuncOp>;
+
+// Returns a list of target devices that may be active for the given
+// operation. This will recursively walk parent operations until one with
+// the `hal.device.targets` attribute is found.
+static SmallVector<IREE::HAL::DeviceTargetAttr>
+lookupDeviceTargetAttrs(Operation *op) {
+  auto attrId = mlir::StringAttr::get(op->getContext(), "hal.device.targets");
+  while (op) {
+    auto targetsAttr = op->getAttrOfType<ArrayAttr>(attrId);
+    if (targetsAttr) {
+      SmallVector<IREE::HAL::DeviceTargetAttr> result;
+      for (auto targetAttr : targetsAttr) {
+        result.push_back(llvm::cast<IREE::HAL::DeviceTargetAttr>(targetAttr));
+      }
+      return result;
+    }
+    op = op->getParentOp();
+  }
+  return {}; // No devices found; let caller decide what to do.
+}
+
+static SmallVector<IREE::HAL::ExecutableTargetAttr, 4>
+lookupExecutableTargets(Operation *op) {
+  SmallVector<IREE::HAL::ExecutableTargetAttr> resultAttrs;
+  for (auto deviceTargetAttr : lookupDeviceTargetAttrs(op)) {
+    for (auto executableTargetAttr : deviceTargetAttr.getExecutableTargets()) {
+      if (!llvm::is_contained(resultAttrs, executableTargetAttr)) {
+        resultAttrs.push_back(executableTargetAttr);
+      }
+    }
+  }
+  return resultAttrs;
+}
 
 class MaterializeHomogeneousEncodingsPass
     : public MaterializeHomogeneousEncodingsBase<
@@ -46,8 +80,7 @@ public:
 
   void runOnOperation() override {
     auto moduleOp = getOperation();
-    auto executableTargets =
-        IREE::HAL::DeviceTargetAttr::lookupExecutableTargets(moduleOp);
+    auto executableTargets = lookupExecutableTargets(moduleOp);
     if (executableTargets.size() != 1) {
       return runNopPipeline(moduleOp);
     }
@@ -65,12 +98,8 @@ public:
     }
 
     OpPassManager passManager(moduleOp.getOperationName());
-    FunctionLikeNest(passManager).addPass([&]() {
-      return createCPUMaterializeUpperBoundTileSizePass(executableTargets);
-    });
-    FunctionLikeNest(passManager).addPass([&]() {
-      return createCPUMaterializeEncodingPass(executableTarget);
-    });
+    passManager.addPass(createCPUMaterializeUpperBoundTileSizePass());
+    passManager.addPass(createCPUMaterializeEncodingPass());
     if (failed(runPipeline(passManager, moduleOp))) {
       return signalPassFailure();
     }

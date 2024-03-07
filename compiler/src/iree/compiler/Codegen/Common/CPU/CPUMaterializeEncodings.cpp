@@ -10,6 +10,7 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenOps.h"
 #include "iree/compiler/Codegen/Utils/Utils.h"
+#include "iree/compiler/Dialect/HAL/Analysis/DeviceAnalysis.h"
 #include "iree/compiler/Dialect/HAL/IR/HALTypes.h"
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtDialect.h"
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
@@ -29,14 +30,13 @@
 namespace mlir::iree_compiler {
 
 using namespace IREE::LinalgExt;
-using IREE::HAL::ExecutableTargetAttr;
 
 // Enumerate tile sizes to choose from when no specific architecture is
 // targeted. For narrow-{M,N} cases, this only enumerates on narrow M. The
 // narrow-N cases are handled by transposition in chooseMatmulTile.
 static SmallVector<TileMxNxK>
 enumerateMatmulTilesVMVX(linalg::ContractionDimensions cDims,
-                         ExecutableTargetAttr target) {
+                         IREE::HAL::ExecutableTargetAttr target) {
   // TODO(hanchung): The ukernel path does not support 3d
   // codegen.query_tile_sizes op, so we disable dynamic tile shapes for
   // batch_matmul.
@@ -58,7 +58,7 @@ enumerateMatmulTilesVMVX(linalg::ContractionDimensions cDims,
 // For narrow-{M,N} cases, this only enumerates on narrow M. The narrow-N cases
 // are handled by transposition in chooseMatmulTile.
 static SmallVector<TileMxNxK>
-enumerateMatmulTileRiscv32(ExecutableTargetAttr target) {
+enumerateMatmulTileRiscv32(IREE::HAL::ExecutableTargetAttr target) {
   if (hasUkernel(target)) {
     return {
         TileMxNxK{8, 8, 4}, // Some reasonable tile shape.
@@ -75,7 +75,8 @@ enumerateMatmulTileRiscv32(ExecutableTargetAttr target) {
 // For narrow-{M,N} cases, this only enumerates on narrow M. The narrow-N cases
 // are handled by transposition in chooseMatmulTile.
 static SmallVector<TileMxNxK>
-enumerateMatmulTileArm64(TypeRange elementTypes, ExecutableTargetAttr target) {
+enumerateMatmulTileArm64(TypeRange elementTypes,
+                         IREE::HAL::ExecutableTargetAttr target) {
   // Data-tiling for SVE is not implemented yet.
   if (hasFeature(target, "+sve") || hasFeature(target, "+sve2")) {
     return {};
@@ -185,7 +186,8 @@ enumerateMatmulTileArm64(TypeRange elementTypes, ExecutableTargetAttr target) {
 // For narrow-{M,N} cases, this only enumerates on narrow M. The narrow-N cases
 // are handled by transposition in chooseMatmulTile.
 static SmallVector<TileMxNxK>
-enumerateMatmulTileX86_64(TypeRange elementTypes, ExecutableTargetAttr target) {
+enumerateMatmulTileX86_64(TypeRange elementTypes,
+                          IREE::HAL::ExecutableTargetAttr target) {
   assert(elementTypes.size() == 3);
   Type lhs = elementTypes[0];
   Type rhs = elementTypes[1];
@@ -376,9 +378,10 @@ static TileMxNxK chooseMatmulTile(ArrayRef<TileMxNxK> enumeratedTiles,
   return bestRatedTile;
 }
 
-SmallVector<TileMxNxK>
+static SmallVector<TileMxNxK>
 enumerateMatmulTileMxNxK(linalg::ContractionDimensions cDims,
-                         TypeRange elementTypes, ExecutableTargetAttr target) {
+                         TypeRange elementTypes,
+                         IREE::HAL::ExecutableTargetAttr target) {
   if (isVMVXBackend(target)) {
     return enumerateMatmulTilesVMVX(cDims, target);
   }
@@ -394,41 +397,9 @@ enumerateMatmulTileMxNxK(linalg::ContractionDimensions cDims,
   return {};
 }
 
-struct CPUMaterializeEncodingPass
-    : public CPUMaterializeEncodingBase<CPUMaterializeEncodingPass> {
-  CPUMaterializeEncodingPass() : targetAttr(nullptr) {}
-  explicit CPUMaterializeEncodingPass(IREE::HAL::ExecutableTargetAttr attr)
-      : targetAttr(attr) {}
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, tensor::TensorDialect,
-                    IREE::LinalgExt::IREELinalgExtDialect,
-                    IREE::Codegen::IREECodegenDialect>();
-  }
-  void runOnOperation() override;
-
-private:
-  IREE::HAL::ExecutableTargetAttr targetAttr;
-};
-
-struct CPUMaterializeUpperBoundTileSizePass
-    : public CPUMaterializeUpperBoundTileSizeBase<
-          CPUMaterializeUpperBoundTileSizePass> {
-  CPUMaterializeUpperBoundTileSizePass() = default;
-  explicit CPUMaterializeUpperBoundTileSizePass(
-      ArrayRef<IREE::HAL::ExecutableTargetAttr> attrs)
-      : targetAttrs(attrs) {}
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect>();
-  }
-  void runOnOperation() override;
-
-private:
-  SmallVector<IREE::HAL::ExecutableTargetAttr, 4> targetAttrs;
-};
-
-FailureOr<MaterializeEncodingInfo>
+static FailureOr<MaterializeEncodingInfo>
 materializeEncodingForTarget(RankedTensorType tensorType,
-                             ExecutableTargetAttr targetAttr) {
+                             IREE::HAL::ExecutableTargetAttr targetAttr) {
   IREE::LinalgExt::EncodingAttr encoding =
       tensorType.getEncoding()
           .dyn_cast_or_null<IREE::LinalgExt::EncodingAttr>();
@@ -476,7 +447,7 @@ materializeEncodingForTarget(RankedTensorType tensorType,
 }
 
 static MaterializeEncodingFn
-getMaterializeEncodingFn(ExecutableTargetAttr targetAttr) {
+getMaterializeEncodingFn(IREE::HAL::ExecutableTargetAttr targetAttr) {
   return
       [targetAttr](
           RankedTensorType tensorType) -> FailureOr<MaterializeEncodingInfo> {
@@ -493,8 +464,8 @@ getMaterializeEncodingFn(ExecutableTargetAttr targetAttr) {
 // executable variant. There, the padding amounts only control the size of
 // allocated buffers, so it's OK to over-estimate (only wasting some memory)
 // but not under-estimate (would cause buffer overruns) padding amounts.
-static MaterializeEncodingFn
-getUpperBoundMaterializeEncodingFn(ArrayRef<ExecutableTargetAttr> targetAttrs) {
+static MaterializeEncodingFn getUpperBoundMaterializeEncodingFn(
+    ArrayRef<IREE::HAL::ExecutableTargetAttr> targetAttrs) {
   return
       [targetAttrs](
           RankedTensorType tensorType) -> FailureOr<MaterializeEncodingInfo> {
@@ -552,73 +523,154 @@ getMaterializeEncodingValueFn(IREE::HAL::ExecutableTargetAttr targetAttr) {
   return {};
 }
 
-void CPUMaterializeEncodingPass::runOnOperation() {
-  MLIRContext *context = &getContext();
-  auto operation = getOperation();
-  RewritePatternSet materializeEncodingPattern(context);
-  if (!targetAttr)
-    targetAttr = ExecutableTargetAttr::lookup(operation);
-  auto materializeEncodingFn = getMaterializeEncodingFn(targetAttr);
-  if (!materializeEncodingFn) {
-    return signalPassFailure();
-  }
-  MaterializeEncodingTypeConverter typeConverter(materializeEncodingFn);
-  MaterializeEncodingConversionTarget target(*context);
-  auto materializeEncodingValueFn = getMaterializeEncodingValueFn(targetAttr);
-  populateMaterializeEncodingIntoPackUnPackPatterns(materializeEncodingPattern,
-                                                    target, typeConverter,
-                                                    materializeEncodingValueFn);
+// NOTE: this runs on host modules and executables and has two paths to handle
+// that. It should _not_ be running on both - target-specific codegen passes
+// are not allowed on host programs and it's a big violation of layering that
+// this exists.
+struct CPUMaterializeEncodingPass
+    : public CPUMaterializeEncodingBase<CPUMaterializeEncodingPass> {
+  CPUMaterializeEncodingPass() = default;
 
-  if (failed(applyPartialConversion(operation, target,
-                                    std::move(materializeEncodingPattern)))) {
-    operation.emitOpError("materialization failed");
-    return signalPassFailure();
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<arith::ArithDialect, tensor::TensorDialect,
+                    IREE::LinalgExt::IREELinalgExtDialect,
+                    IREE::Codegen::IREECodegenDialect>();
   }
 
-  // Add patterns to fold pack/unpack ops with pad/extract_slice ops and resolve
-  // dims ops.
-  {
-    RewritePatternSet patterns(context);
-    tensor::populateFoldIntoPackAndUnpackPatterns(patterns);
-    memref::populateResolveRankedShapedTypeResultDimsPatterns(patterns);
-    if (failed(applyPatternsAndFoldGreedily(operation, std::move(patterns)))) {
-      operation.emitOpError("folding patterns failed");
-      return signalPassFailure();
+  void runOnOperation() override {
+    auto moduleOp = getOperation();
+    if (moduleOp->getParentOfType<IREE::HAL::ExecutableOp>()) {
+      runOnDeviceProgram(moduleOp);
+    } else {
+      runOnHostProgram(moduleOp);
     }
   }
+
+  void runOnDeviceProgram(ModuleOp moduleOp) {
+    auto executableTargetAttr =
+        IREE::HAL::ExecutableTargetAttr::lookup(moduleOp);
+    assert(executableTargetAttr && "need an executable target");
+    for (auto funcOp : moduleOp.getOps<FunctionOpInterface>()) {
+      // Materialize encodings within the function.
+      runOnFuncOp(funcOp, executableTargetAttr);
+    }
+  }
+
+  void runOnHostProgram(ModuleOp moduleOp) {
+    // Run required analysis passes.
+    IREE::HAL::DeviceAnalysis deviceAnalysis(moduleOp);
+    if (failed(deviceAnalysis.run()))
+      return signalPassFailure();
+
+    for (auto funcOp : moduleOp.getOps<FunctionOpInterface>()) {
+      // Gather the required executable targets for the function. Note that it's
+      // possible there are more required for ops nested within the function but
+      // this pass is a hack and can't handle that :shrug:.
+      SetVector<IREE::HAL::ExecutableTargetAttr> executableTargets;
+      deviceAnalysis.gatherRequiredExecutableTargets(funcOp, executableTargets);
+
+      // HACK: this pass is run on the host _but shouldn't be_. Because it's
+      // run on the host and IREE is a compiler capable of multi-targeting there
+      // may be multiple executable targets at any point in the host program.
+      // This pass can't handle that and assumes it's been checked earlier by
+      // spooky action at a distance. This needs to be fixed.
+      if (executableTargets.size() != 1) {
+        funcOp.emitOpError() << "has multiple executable targets and CPU data "
+                                "tiling isn't built to support that";
+        return signalPassFailure();
+      }
+
+      // Materialize encodings within the function.
+      runOnFuncOp(funcOp, executableTargets.front());
+    }
+  }
+
+  void runOnFuncOp(FunctionOpInterface funcOp,
+                   IREE::HAL::ExecutableTargetAttr executableTargetAttr) {
+    RewritePatternSet materializeEncodingPattern(&getContext());
+    auto materializeEncodingFn = getMaterializeEncodingFn(executableTargetAttr);
+    if (!materializeEncodingFn) {
+      return signalPassFailure();
+    }
+    MaterializeEncodingTypeConverter typeConverter(materializeEncodingFn);
+    MaterializeEncodingConversionTarget target(getContext());
+    auto materializeEncodingValueFn =
+        getMaterializeEncodingValueFn(executableTargetAttr);
+    populateMaterializeEncodingIntoPackUnPackPatterns(
+        materializeEncodingPattern, target, typeConverter,
+        materializeEncodingValueFn);
+
+    if (failed(applyPartialConversion(funcOp, target,
+                                      std::move(materializeEncodingPattern)))) {
+      funcOp.emitOpError("materialization failed");
+      return signalPassFailure();
+    }
+
+    // Add patterns to fold pack/unpack ops with pad/extract_slice ops and
+    // resolve dims ops.
+    {
+      RewritePatternSet patterns(&getContext());
+      tensor::populateFoldIntoPackAndUnpackPatterns(patterns);
+      memref::populateResolveRankedShapedTypeResultDimsPatterns(patterns);
+      if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
+        funcOp.emitOpError("folding patterns failed");
+        return signalPassFailure();
+      }
+    }
+  }
+};
+
+std::unique_ptr<Pass> createCPUMaterializeEncodingPass() {
+  return std::make_unique<CPUMaterializeEncodingPass>();
 }
 
-void CPUMaterializeUpperBoundTileSizePass::runOnOperation() {
-  MLIRContext *context = &getContext();
-  auto operation = getOperation();
-  if (targetAttrs.empty()) {
-    targetAttrs =
-        IREE::HAL::DeviceTargetAttr::lookupExecutableTargets(operation);
-  }
-  RewritePatternSet patterns(context);
-  MaterializeEncodingFn materializeEncodingFn =
-      getUpperBoundMaterializeEncodingFn(targetAttrs);
-  if (!materializeEncodingFn) {
-    return signalPassFailure();
-  }
-  populateMaterializeUpperBoundTileSizePatterns(patterns,
-                                                materializeEncodingFn);
-  if (failed(applyPatternsAndFoldGreedily(operation, std::move(patterns)))) {
-    operation.emitOpError(
-        "encoding padding sizes materialization pattern failed");
-    return signalPassFailure();
-  }
-}
+// NOTE: this runs on host modules.
+struct CPUMaterializeUpperBoundTileSizePass
+    : public CPUMaterializeUpperBoundTileSizeBase<
+          CPUMaterializeUpperBoundTileSizePass> {
+  CPUMaterializeUpperBoundTileSizePass() = default;
 
-std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
-createCPUMaterializeEncodingPass(IREE::HAL::ExecutableTargetAttr targetAttr) {
-  return std::make_unique<CPUMaterializeEncodingPass>(targetAttr);
-}
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<arith::ArithDialect>();
+  }
 
-std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
-createCPUMaterializeUpperBoundTileSizePass(
-    ArrayRef<IREE::HAL::ExecutableTargetAttr> targetAttrs) {
-  return std::make_unique<CPUMaterializeUpperBoundTileSizePass>(targetAttrs);
+  void runOnOperation() {
+    auto moduleOp = getOperation();
+
+    // Run required analysis passes.
+    IREE::HAL::DeviceAnalysis deviceAnalysis(moduleOp);
+    if (failed(deviceAnalysis.run()))
+      return signalPassFailure();
+
+    for (auto funcOp : moduleOp.getOps<FunctionOpInterface>()) {
+      // Gather the required executable targets for the function. Note that it's
+      // possible there are more required for ops nested within the function but
+      // this pass is a hack and can't handle that :shrug:.
+      SetVector<IREE::HAL::ExecutableTargetAttr> executableTargets;
+      deviceAnalysis.gatherRequiredExecutableTargets(funcOp, executableTargets);
+
+      // Get patterns specialized for the executable targets used by the
+      // function.
+      RewritePatternSet patterns(&getContext());
+      MaterializeEncodingFn materializeEncodingFn =
+          getUpperBoundMaterializeEncodingFn(executableTargets.getArrayRef());
+      if (!materializeEncodingFn)
+        return signalPassFailure();
+      populateMaterializeUpperBoundTileSizePatterns(patterns,
+                                                    materializeEncodingFn);
+
+      // Run patterns on the function.
+      if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns)))) {
+        funcOp.emitOpError(
+            "encoding padding sizes materialization pattern failed");
+        return signalPassFailure();
+      }
+    }
+  }
+};
+
+std::unique_ptr<Pass> createCPUMaterializeUpperBoundTileSizePass() {
+  return std::make_unique<CPUMaterializeUpperBoundTileSizePass>();
 }
 
 } // namespace mlir::iree_compiler

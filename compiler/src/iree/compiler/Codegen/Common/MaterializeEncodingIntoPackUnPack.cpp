@@ -29,7 +29,6 @@
 namespace mlir::iree_compiler {
 
 using namespace IREE::LinalgExt;
-using IREE::HAL::ExecutableTargetAttr;
 
 //===---------------------------------------------------------------------===//
 // Utility methods

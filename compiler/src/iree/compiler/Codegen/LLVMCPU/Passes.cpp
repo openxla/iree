@@ -771,8 +771,8 @@ void buildLLVMCPUCodegenConfigurationPassPipeline(OpPassManager &passManager) {
     // to late and should insted be be done during lowering to LLVM.
     modulePassManager.addPass(createExpandF16OpToF32Pass());
 
-    modulePassManager.addNestedPass<func::FuncOp>(
-        createCPUMaterializeEncodingPass());
+    modulePassManager.addPass(createCPUMaterializeEncodingPass());
+
     // TODO: Remove the following pass the plumb support for
     // #hal.descriptor_type memory space through the stack.
     modulePassManager.addPass(createEraseHALDescriptorTypeFromMemRefPass());

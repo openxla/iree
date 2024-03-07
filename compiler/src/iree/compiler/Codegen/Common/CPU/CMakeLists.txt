@@ -43,7 +43,7 @@ iree_cc_library(
     "Passes.h"
   SRCS
     "CPULowerToUKernels.cpp"
-    "CPUMaterializeEncodingPass.cpp"
+    "CPUMaterializeEncodings.cpp"
     "Passes.cpp"
   DEPS
     ::PassHeaders
@@ -80,6 +80,7 @@ iree_cc_library(
     iree::compiler::Codegen::Interfaces::UKernelOpInterface
     iree::compiler::Codegen::Transforms
     iree::compiler::Codegen::Utils
+    iree::compiler::Dialect::HAL::Analysis
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::LinalgExt::IR
     iree::compiler::Dialect::LinalgExt::Utils
