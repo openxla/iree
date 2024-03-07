@@ -19,6 +19,12 @@ def GPUCheckResourceUsage :
   let constructor = "mlir::iree_compiler::createGPUCheckResourceUsagePass()";
 }
 
+def GPUCreateFastSlowPath :
+    InterfacePass<"iree-codegen-gpu-create-fast-slow-path", "mlir::FunctionOpInterface"> {
+  let summary = "Create separate fast and slow paths to handle padding";
+  let constructor = "mlir::iree_compiler::createGPUCreateFastSlowPathPass()";
+}
+
 def GPUDistribute :
     InterfacePass<"iree-codegen-gpu-distribute", "mlir::FunctionOpInterface"> {
   let summary = "Pass to distribute scf.forall ops.";
@@ -29,12 +35,6 @@ def GPUDistributeSharedMemoryCopy :
     InterfacePass<"iree-codegen-gpu-distribute-shared-memory-copy", "mlir::FunctionOpInterface"> {
   let summary = "Pass to distribute shared memory copies to threads.";
   let constructor = "mlir::iree_compiler::createGPUDistributeSharedMemoryCopy()";
-}
-
-def GPUGeneralizeNamedConvolutionAndContractionOps :
-    InterfacePass<"iree-codegen-gpu-generalize-named-convolution-and-contraction-ops", "mlir::FunctionOpInterface"> {
-  let summary = "Convert named Linalg convolution and contraction ops to linalg.generic ops";
-  let constructor = "mlir::iree_compiler::createGPUGeneralizeNamedConvolutionAndContractionOpsPass()";
 }
 
 def GPUGeneralizeNamedOps :

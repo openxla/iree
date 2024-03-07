@@ -52,6 +52,8 @@ iree_cc_library(
     "stream_command_buffer.h"
     "timepoint_pool.c"
     "timepoint_pool.h"
+    "tracing.c"
+    "tracing.h"
   INCLUDES
     "${HIP_API_HEADERS_ROOT}"
   DEPS
@@ -64,6 +66,7 @@ iree_cc_library(
     iree::base::internal::event_pool
     iree::base::internal::synchronization
     iree::base::internal::threading
+    iree::base::internal::wait_handle
     iree::base::internal::flatcc::parsing
     iree::hal
     iree::hal::utils::collective_batch

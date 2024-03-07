@@ -77,6 +77,13 @@ std::unique_ptr<OperationPass<ModuleOp>> createGPUCheckResourceUsagePass(
     std::function<unsigned(mlir::FunctionOpInterface)> getIndexBitwidth =
         nullptr);
 
+// Uses `tensor.pad` ops as anchors to create separate fast and slow paths
+// inside the kernel. The fast path is for inner tiles where we don't need
+// padding, while the slow path is for boundary tiles where we do need
+// padding.
+std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
+createGPUCreateFastSlowPathPass();
+
 /// Creates a pass to distribute scf.forall ops to GPU processors.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>> createGPUDistribute();
 
@@ -139,11 +146,6 @@ createWorkgroupSpecializationPass();
 /// Converts vector ops to gpu dialect.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createWorkGroupSwizzle(unsigned swizzleLogTile = 0);
-
-// This pass generalizes named Linalg convolution and contraction ops to allow
-// for better folding of unit dimensions.
-std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
-createGPUGeneralizeNamedConvolutionAndContractionOpsPass();
 
 // This pass generalizes named Linalg ops that are better off as generics.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
