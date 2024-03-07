@@ -175,11 +175,11 @@ inferVectorSizesFromIR(tensor::PackOp op) {
 }
 
 static std::optional<SmallVector<int64_t>> inferVectorSizesFromIR(Value val) {
-  if (!val.getDefiningOp()) {
-    auto type = dyn_cast<RankedTensorType>(val.getType());
-    if (!type || !type.hasStaticShape()) {
-      return std::nullopt;
-    }
+  auto type = dyn_cast<RankedTensorType>(val.getType());
+  if (!type) {
+    return std::nullopt;
+  }
+  if (type.hasStaticShape()) {
     return SmallVector<int64_t>(type.getShape());
   }
 
@@ -314,11 +314,12 @@ void GenericVectorizationPass::runOnOperation() {
     if (enableVectorMasking) {
       std::optional<SizesAndScalableFlags> vectorSizesAndScalableDims =
           getVectorSizes(op, useConfiguredVectorSizes);
-      if (vectorSizesAndScalableDims) {
-        auto [sizes, scalableDims] = *vectorSizesAndScalableDims;
-        vectorSizes.append(sizes.begin(), sizes.end());
-        scalableVecDims.append(scalableDims.begin(), scalableDims.end());
+      if (!vectorSizesAndScalableDims) {
+        continue;
       }
+      auto [sizes, scalableDims] = *vectorSizesAndScalableDims;
+      vectorSizes.append(sizes.begin(), sizes.end());
+      scalableVecDims.append(scalableDims.begin(), scalableDims.end());
     } else if (isa<tensor::PackOp, tensor::UnPackOp>(op)) {
       // TODO: Support vectorization for static cases without passing
       // input_vector_sizes.
