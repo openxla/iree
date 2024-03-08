@@ -218,46 +218,12 @@ Value IREE::HAL::DeviceTargetAttr::buildDeviceEnumeration(
     // let the default handling take care of things.
     Value match;
     auto targetDevice = targetRegistry.getTargetDevice(getDeviceID());
-    if (targetDevice) {
+    if (targetDevice)
       match = targetDevice->buildDeviceTargetMatch(loc, device, *this, builder);
-    }
     if (match)
       return match;
-
-    // Match first on the device ID, as that's the top-level filter.
-    Value idMatch = IREE::HAL::DeviceQueryOp::createI1(
-        loc, device, "hal.device.id", getDeviceID(), builder);
-
-    // If there are executable formats defined we should check at least one of
-    // them is supported.
-    auto executableTargetAttrs =
-        const_cast<IREE::HAL::DeviceTargetAttr *>(this)->getExecutableTargets();
-    if (executableTargetAttrs.empty()) {
-      match = idMatch; // just device ID
-    } else {
-      auto ifOp = builder.create<scf::IfOp>(loc, builder.getI1Type(), idMatch,
-                                            true, true);
-      auto thenBuilder = ifOp.getThenBodyBuilder();
-      Value anyFormatMatch;
-      for (auto executableTargetAttr : executableTargetAttrs) {
-        Value formatMatch = IREE::HAL::DeviceQueryOp::createI1(
-            loc, device, "hal.executable.format",
-            executableTargetAttr.getFormat().getValue(), thenBuilder);
-        if (!anyFormatMatch) {
-          anyFormatMatch = formatMatch;
-        } else {
-          anyFormatMatch = thenBuilder.create<arith::OrIOp>(loc, anyFormatMatch,
-                                                            formatMatch);
-        }
-      }
-      thenBuilder.create<scf::YieldOp>(loc, anyFormatMatch);
-      auto elseBuilder = ifOp.getElseBodyBuilder();
-      Value falseValue = elseBuilder.create<arith::ConstantIntOp>(loc, 0, 1);
-      elseBuilder.create<scf::YieldOp>(loc, falseValue);
-      match = ifOp.getResult(0);
-    }
-
-    return match;
+    return buildDeviceIDAndExecutableFormatsMatch(
+        loc, device, getDeviceID(), getExecutableTargets(), builder);
   };
 
   // Enumerate all devices and match the first one found (if any).
