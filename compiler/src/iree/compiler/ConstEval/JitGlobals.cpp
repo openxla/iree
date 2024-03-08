@@ -7,6 +7,7 @@
 #include "iree/compiler/ConstEval/PassDetail.h"
 #include "iree/compiler/ConstEval/Passes.h"
 #include "iree/compiler/ConstEval/Runtime.h"
+#include "iree/compiler/Dialect/HAL/Target/TargetOptions.h"
 #include "iree/compiler/Pipelines/Pipelines.h"
 #include "iree/compiler/Utils/PassUtils.h"
 #include "llvm/ADT/DenseSet.h"
