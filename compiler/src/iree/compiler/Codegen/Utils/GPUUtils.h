@@ -36,7 +36,8 @@ getSubgroupIdsAndCounts(OpBuilder &builder, Location loc, unsigned warpSize,
                         unsigned numDims, llvm::ArrayRef<int64_t> numSubgroups);
 
 /// Returns the workgroup size associated to the funcOp entry point.
-std::array<int64_t, 3> getWorkgroupSize(mlir::FunctionOpInterface funcOp);
+std::optional<std::array<int64_t, 3>>
+getWorkgroupSize(mlir::FunctionOpInterface funcOp);
 
 /// Returns the subgroup size associated to the funcOp entry point.
 std::optional<int64_t> getSubgroupSize(mlir::FunctionOpInterface funcOp);

@@ -324,35 +324,9 @@ namespace mlir::iree_compiler {
 // ===----------------------------------------------------------------------===//
 
 IREE::Codegen::TranslationInfoAttr
-getTranslationInfo(IREE::HAL::ExecutableExportOp exportOp) {
-  return exportOp->getAttrOfType<IREE::Codegen::TranslationInfoAttr>(
+getTranslationInfo(FunctionOpInterface funcOp) {
+  return funcOp->getAttrOfType<IREE::Codegen::TranslationInfoAttr>(
       kTranslationInfoAttrName);
-}
-
-std::optional<IREE::Codegen::TranslationInfoAttr>
-getIdenticalTranslationInfo(IREE::HAL::ExecutableVariantOp variantOp) {
-  ModuleOp moduleOp = variantOp.getInnerModule();
-  if (!moduleOp) {
-    return std::nullopt;
-  }
-
-  std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo;
-  for (auto exportOp : variantOp.getExportOps()) {
-    IREE::Codegen::TranslationInfoAttr currTranslationInfo =
-        getTranslationInfo(exportOp);
-    if (!currTranslationInfo) {
-      continue;
-    }
-    if (!translationInfo) {
-      translationInfo = currTranslationInfo;
-      continue;
-    }
-    if (currTranslationInfo != translationInfo.value()) {
-      return std::nullopt;
-    }
-  }
-
-  return translationInfo;
 }
 
 SmallVector<int64_t> getWorkgroupSize(IREE::HAL::ExecutableExportOp exportOp) {
@@ -375,9 +349,11 @@ std::optional<int64_t> getSubgroupSize(IREE::HAL::ExecutableExportOp exportOp) {
 LogicalResult setDispatchConfig(mlir::FunctionOpInterface entryPoint,
                                 ArrayRef<int64_t> workgroupSize,
                                 std::optional<int64_t> subgroupSize) {
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(entryPoint);
-  if (failed(exportOp))
+  std::optional<IREE::HAL::ExecutableExportOp> exportOp =
+      getEntryPoint(entryPoint);
+  if (!exportOp) {
     return failure();
+  }
   MLIRContext *context = exportOp->getContext();
   if (!workgroupSize.empty()) {
     exportOp->setWorkgroupSizeAttr(getIndexArrayAttr(context, workgroupSize));
@@ -391,10 +367,7 @@ LogicalResult setDispatchConfig(mlir::FunctionOpInterface entryPoint,
 LogicalResult
 setTranslationInfo(mlir::FunctionOpInterface entryPoint,
                    IREE::Codegen::TranslationInfoAttr translationInfo) {
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(entryPoint);
-  if (failed(exportOp))
-    return failure();
-  exportOp.value()->setAttr(kTranslationInfoAttrName, translationInfo);
+  entryPoint->setAttr(kTranslationInfoAttrName, translationInfo);
   return success();
 }
 

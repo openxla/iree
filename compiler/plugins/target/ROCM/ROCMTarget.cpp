@@ -326,14 +326,14 @@ public:
       }
 
       int64_t wavesPerEu = options.wavesPerEu;
-      IREE::Codegen::TranslationInfoAttr translationInfo =
-          getTranslationInfo(exportOp);
-      if (auto translationConfig = translationInfo.getConfiguration()) {
-        if (auto attr = dyn_cast_or_null<IntegerAttr>(
-                translationConfig.get("amdgpu-waves-per-eu"))) {
-          wavesPerEu = attr.getValue().getSExtValue();
-        }
-      }
+      // IREE::Codegen::TranslationInfoAttr translationInfo =
+      //     getTranslationInfo(exportOp);
+      // if (auto translationConfig = translationInfo.getConfiguration()) {
+      //   if (auto attr = dyn_cast_or_null<IntegerAttr>(
+      //           translationConfig.get("amdgpu-waves-per-eu"))) {
+      //     wavesPerEu = attr.getValue().getSExtValue();
+      //   }
+      // }
 
       workgroupSizes.push_back(workgroupSize);
       uint32_t workgroupLocalMemory = 0;

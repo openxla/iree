@@ -760,19 +760,7 @@ DiagnosedSilenceableFailure transform_dialect::IREEBufferizeOp::apply(
     transform::TransformRewriter &rewriter,
     transform::TransformResults &results, transform::TransformState &state) {
   auto payload = state.getPayloadOps(getTarget());
-  if (!llvm::hasSingleElement(payload) ||
-      !isa<ModuleOp, HAL::ExecutableOp, HAL::ExecutableVariantOp>(
-          *payload.begin())) {
-    return mlir::emitDefiniteFailure(
-        state.getTopLevel(), "requires exactly a single HAL::ExecutableOp or "
-                             "HAL::ExecutableVariantOp target op.");
-  }
 
-  //===-------------------------------------------------------------------===//
-  // DO NOT JUST CALL `addIREEComprehensiveBufferizePasses` as this results in
-  // a lot of registration issues due to nested pass pipeline mess.
-  // Instead, take what we need from it.
-  //===-------------------------------------------------------------------===//
   // Bufferize the dispatch.
   using mlir::bufferization::BufferizationOptions;
   BufferizationOptions::AllocationFn allocationFn =

@@ -61,13 +61,13 @@ public:
 };
 } // namespace
 
-/// Verify that valid configuration is set for all ops within the module.
+/// Verify that valid configuration is set for all ops within the funcOp.
 template <typename F>
 static LogicalResult
-verifyLoweringConfiguration(ModuleOp module,
+verifyLoweringConfiguration(FunctionOpInterface funcOp,
                             IREE::Codegen::TranslationInfoAttr translationInfo,
                             F verificationFn) {
-  auto walkResult = module.walk([&](Operation *op) -> WalkResult {
+  auto walkResult = funcOp.walk([&](Operation *op) -> WalkResult {
     IREE::Codegen::LoweringConfigAttr loweringConfig = getLoweringConfig(op);
     if (!loweringConfig)
       return WalkResult::advance();
@@ -79,36 +79,29 @@ verifyLoweringConfiguration(ModuleOp module,
 }
 
 void LLVMCPUSelectLoweringStrategyPass::runOnOperation() {
-  IREE::HAL::ExecutableVariantOp variantOp = getOperation();
-  ModuleOp moduleOp = variantOp.getInnerModule();
+  auto funcOp = getOperation();
 
   // Set the strategy with default heuristics.
-  if (failed(initCPULaunchConfig(moduleOp))) {
+  if (failed(initCPULaunchConfig(funcOp))) {
     return signalPassFailure();
   }
 
-  std::optional<IREE::Codegen::TranslationInfoAttr> translationInfo =
-      getIdenticalTranslationInfo(variantOp);
+  auto translationInfo = getTranslationInfo(funcOp);
   if (!translationInfo) {
-    moduleOp.emitOpError(
-        "unhandled compilation of entry point functions with different "
-        "translation info");
-    return signalPassFailure();
+    return;
   }
 
   // Verify the configuration.
   LogicalResult verificationStatus = success();
-  switch (translationInfo.value().getDispatchLoweringPassPipeline()) {
+  switch (translationInfo.getDispatchLoweringPassPipeline()) {
   case IREE::Codegen::DispatchLoweringPassPipeline::CPUDoubleTilingExpert:
-    verificationStatus =
-        verifyLoweringConfiguration(moduleOp, translationInfo.value(),
-                                    verifyDoubleTilingExpertPassPipelineConfig);
+    verificationStatus = verifyLoweringConfiguration(
+        funcOp, translationInfo, verifyDoubleTilingExpertPassPipelineConfig);
     break;
   case IREE::Codegen::DispatchLoweringPassPipeline::
       CPUConvTileAndDecomposeExpert:
-    verificationStatus =
-        verifyLoweringConfiguration(moduleOp, translationInfo.value(),
-                                    verifyConvTileAndDecomposeExpertConfig);
+    verificationStatus = verifyLoweringConfiguration(
+        funcOp, translationInfo, verifyConvTileAndDecomposeExpertConfig);
     break;
   default:
     break;
@@ -118,7 +111,7 @@ void LLVMCPUSelectLoweringStrategyPass::runOnOperation() {
   }
 }
 
-std::unique_ptr<OperationPass<IREE::HAL::ExecutableVariantOp>>
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createLLVMCPUSelectLoweringStrategyPass() {
   return std::make_unique<LLVMCPUSelectLoweringStrategyPass>();
 }

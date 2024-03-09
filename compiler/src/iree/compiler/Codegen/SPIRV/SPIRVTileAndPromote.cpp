@@ -142,9 +142,10 @@ private:
 void SPIRVTileAndPromotePass::runOnOperation() {
   MLIRContext *context = &getContext();
   auto funcOp = getOperation();
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
-  if (failed(exportOp))
+  std::optional<IREE::HAL::ExecutableExportOp> exportOp = getEntryPoint(funcOp);
+  if (!exportOp) {
     return;
+  }
 
   auto threadTileComputeFn = getSPIRVTileSizeComputeFn(funcOp, 1);
   if (failed(threadTileComputeFn))

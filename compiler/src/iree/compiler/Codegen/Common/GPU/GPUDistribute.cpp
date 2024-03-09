@@ -25,16 +25,17 @@ struct GPUDistributePass : public GPUDistributeBase<GPUDistributePass> {
   }
   void runOnOperation() override {
     auto funcOp = getOperation();
-    if (!isEntryPoint(funcOp))
+    std::optional<IREE::HAL::ExecutableExportOp> exportOp =
+        getEntryPoint(funcOp);
+    if (!exportOp)
       return;
 
     auto workgroupSize = llvm::map_to_vector(
-        getEntryPoint(funcOp)->getWorkgroupSize().value(),
+        exportOp->getWorkgroupSize().value(),
         [&](Attribute attr) { return llvm::cast<IntegerAttr>(attr).getInt(); });
 
     // TODO: Thread through subgroup size everywhere.
-    std::optional<llvm::APInt> maybeSubgroupSize =
-        getEntryPoint(funcOp)->getSubgroupSize();
+    std::optional<llvm::APInt> maybeSubgroupSize = exportOp->getSubgroupSize();
     // TODO: Don't hard code kCudaWarpSize here.
     int64_t subgroupSize =
         maybeSubgroupSize ? maybeSubgroupSize->getSExtValue() : kCudaWarpSize;

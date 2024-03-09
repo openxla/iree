@@ -225,8 +225,13 @@ public:
 
     debugPrint(funcOp, "after step #1: preprocessing reduction ops");
 
+    std::optional<IREE::HAL::ExecutableExportOp> exportOp =
+        getEntryPoint(funcOp);
+    if (!exportOp) {
+      return;
+    }
     auto workgroupSize = llvm::map_to_vector(
-        getEntryPoint(funcOp)->getWorkgroupSize().value(),
+        exportOp->getWorkgroupSize().value(),
         [&](Attribute attr) { return llvm::cast<IntegerAttr>(attr).getInt(); });
     assert(workgroupSize[1] == 1 && workgroupSize[2] == 1);
     // 2. Create the warp op and move the function body into it.

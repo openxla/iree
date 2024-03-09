@@ -83,10 +83,14 @@ getSubgroupIdsAndCounts(mlir::OpBuilder &builder, mlir::Location loc,
   return procInfo;
 }
 
-std::array<int64_t, 3> getWorkgroupSize(mlir::FunctionOpInterface funcOp) {
+std::optional<std::array<int64_t, 3>>
+getWorkgroupSize(mlir::FunctionOpInterface funcOp) {
   std::array<int64_t, 3> workgroupSize;
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp =
+  std::optional<IREE::HAL::ExecutableExportOp> exportOp =
       mlir::iree_compiler::getEntryPoint(funcOp);
+  if (!exportOp) {
+    return std::nullopt;
+  }
   std::optional<mlir::ArrayAttr> workgroupSizeAttr =
       exportOp->getWorkgroupSize();
   assert(workgroupSizeAttr.has_value());
@@ -98,9 +102,9 @@ std::array<int64_t, 3> getWorkgroupSize(mlir::FunctionOpInterface funcOp) {
 }
 
 std::optional<int64_t> getSubgroupSize(mlir::FunctionOpInterface funcOp) {
-  FailureOr<IREE::HAL::ExecutableExportOp> exportOp =
+  std::optional<IREE::HAL::ExecutableExportOp> exportOp =
       mlir::iree_compiler::getEntryPoint(funcOp);
-  if (failed(exportOp)) {
+  if (!exportOp) {
     return std::nullopt;
   }
   if (IntegerAttr attr = exportOp->getSubgroupSizeAttr()) {

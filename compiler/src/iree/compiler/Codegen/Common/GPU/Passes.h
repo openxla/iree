@@ -71,7 +71,8 @@ LogicalResult gpuDistributeSharedMemoryCopy(mlir::FunctionOpInterface funcOp);
 // This size is used to check the allocation space required for memrefs of
 // indices. If this function is nullptr, this pass will query the datalayout to
 // get the index size.
-std::unique_ptr<OperationPass<ModuleOp>> createGPUCheckResourceUsagePass(
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
+createGPUCheckResourceUsagePass(
     std::function<unsigned(mlir::FunctionOpInterface)> getSharedMemoryLimit =
         nullptr,
     std::function<unsigned(mlir::FunctionOpInterface)> getIndexBitwidth =

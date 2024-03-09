@@ -904,7 +904,8 @@ struct FlattenMemRefSubspanPass
 
 } // namespace
 
-std::unique_ptr<OperationPass<ModuleOp>> createFlattenMemRefSubspanPass() {
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
+createFlattenMemRefSubspanPass() {
   return std::make_unique<FlattenMemRefSubspanPass>();
 }
 
