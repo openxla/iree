@@ -248,7 +248,7 @@ iree_cc_binary(
   NAME
     iree-e2e-matmul-test
   SRCS
-    "iree-e2e-matmul-test.cc"
+  "${IREE_SOURCE_DIR}/tools/testing/e2e/iree-e2e-matmul-test.cc"
   DEPS
     iree::base
     iree::base::internal::cpu
@@ -258,6 +258,27 @@ iree_cc_binary(
     iree::modules::hal
     iree::tooling::context_util
     iree::tooling::device_util
+    iree::tools::testing::e2e::e2e_test_util
+    iree::vm
+    iree::vm::cc
+)
+
+iree_cc_binary(
+  NAME
+    iree-e2e-conv2d-test
+  SRCS
+  "${IREE_SOURCE_DIR}/tools/testing/e2e/iree-e2e-conv2d-test.cc"
+  DEPS
+    iree::base
+    iree::base::internal::cpu
+    iree::base::internal::flags
+    iree::base::internal::path
+    iree::hal
+    iree::modules::hal
+    iree::tooling::context_util
+    iree::tooling::device_util
+    iree::tools::testing::e2e::e2e_test_util
+    iree::vm
     iree::vm
     iree::vm::cc
 )

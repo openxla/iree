@@ -1,0 +1,57 @@
+# Copyright 2022 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# End-to-end convolution 2d tests.
+
+load("//build_tools/bazel:iree_e2e_generated_test.bzl", "iree_generated_e2e_test")
+
+package(
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+py_binary(
+    name = "generate_e2e_conv2d_tests",
+    srcs = ["generate_e2e_conv2d_tests.py"],
+)
+
+###########################################################################
+##
+## LLVMCPU backend
+##
+###########################################################################
+
+
+# LLVMCPU, non-data-tiling, no microkernels
+[iree_generated_e2e_test(
+    name = "e2e_conv2d_cpu_%s_%s_%s_%s" % (dtype, dtype, dtype, size),
+    test_name = "conv2ds",
+    compiler_flags = [
+    ],
+    generator = ":generate_e2e_conv2d_tests",
+    generator_args = [
+        "--input_type=%s" % dtype,
+        "--kernel_type=%s" % dtype,
+        "--acc_type=%s" % dtype,
+        "--shapes=%s" % size,
+    ],
+    tags = [
+    ],
+    target_backends_and_drivers = [
+        ("llvm-cpu", "local-task"),
+    ],
+    target_cpu_features_variants = ["default"],
+    test_runner = "//tools:iree-e2e-conv2d-test",
+) for dtype in [
+    "f32",
+    "f16",
+    # "f64" (also supported for ArmSME, but not by the test generator)
+] for size in [
+    "small",
+    "medium",
+    "large",
+]]
+
