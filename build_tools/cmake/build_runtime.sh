@@ -17,6 +17,8 @@ set -xeuo pipefail
 
 BUILD_DIR="${1:-${IREE_TARGET_BUILD_DIR:-build-runtime}}"
 BUILD_PRESET="${BUILD_PRESET:-test}"
+CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
+IREE_BUILD_PYTHON_BINDINGS="${IREE_BUILD_PYTHON_BINDINGS:-ON}"
 
 source build_tools/cmake/setup_build.sh
 # Note: not using ccache since the runtime build should be fast already.
@@ -25,10 +27,13 @@ declare -a args
 args=(
   "-G" "Ninja"
   "-B" "${BUILD_DIR}"
+
+  "-DIREE_BUILD_COMPILER=OFF"
+  "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+
+  "-DIREE_BUILD_PYTHON_BINDINGS=${IREE_BUILD_PYTHON_BINDINGS}"
   "-DPython3_EXECUTABLE=${IREE_PYTHON3_EXECUTABLE}"
   "-DPYTHON_EXECUTABLE=${IREE_PYTHON3_EXECUTABLE}"
-  "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
-  "-DIREE_BUILD_COMPILER=OFF"
 )
 
 case "${BUILD_PRESET}" in
