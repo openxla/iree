@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstdint>
 #include "iree-dialects/Dialect/VectorExt/IR/VectorExtDialect.h"
 #include "iree-dialects/Dialect/VectorExt/IR/VectorExtOps.h"
 #include "iree/compiler/Codegen/Common/GPU/GPUPatterns.h"
@@ -20,6 +21,7 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Rewrite/PatternApplicator.h"
@@ -137,6 +139,9 @@ static SmallVector<int64_t>
 getElementVectorTileShape(NestedLayoutAttr vectorLayout) {
   int64_t rank = vectorLayout.getBatchOrder().size();
   SmallVector<int64_t> tileShape = vectorLayout.getDistributedShape();
+  // We tile to a vector with BATCH, OUTER, and ELEMENT dimensions. So to access
+  // the subvector only containing elements, we need indices in all BATCH and
+  // OUTER (rank * 2) dimensions to have tile size 1.
   for (int i = 0, e = rank * 2; i < e; ++i) {
     tileShape[i] = 1;
   }
@@ -149,29 +154,43 @@ static void populateWarpAndThreadIndices(RewriterBase &rewriter, Value threadId,
                                          NestedLayoutAttr vectorLayout,
                                          SmallVector<Value> &warpIndices,
                                          SmallVector<Value> &threadIndices) {
-  int64_t rank = vectorLayout.getBatchOrder().size();
+  int64_t subgroupRank = vectorLayout.getSubgroupBasis().size();
   // The delinearized thread IDs are returned from outer most to inner most,
   // i.e. before applying the layout described dimensions ordering.
-  ValueRange threadIds = vectorLayout.computeThreadIds(threadId, rewriter);
+  SmallVector<Value> threadIds =
+      vectorLayout.computeThreadIds(threadId, rewriter);
+
+  SmallVector<Value> filteredSubgroupIds;
+  for (auto [id, active] :
+       llvm::zip(threadIds, vectorLayout.getSubgroupActiveIds())) {
+    if (active)
+      filteredSubgroupIds.push_back(id);
+  }
+  SmallVector<Value> filteredThreadIds;
+  for (auto [id, active] : llvm::zip(llvm::drop_begin(threadIds, subgroupRank),
+                                     vectorLayout.getThreadActiveIds())) {
+    if (active)
+      filteredThreadIds.push_back(id);
+  }
 
   // Subgroup and thread (lane) indices normalized to the order in which
   // they are used by each dimension.
-  warpIndices =
-      llvm::to_vector(llvm::map_range(vectorLayout.getSubgroupOrder(),
-                                      [&](int64_t i) { return threadIds[i]; }));
+  warpIndices = llvm::to_vector(
+      llvm::map_range(vectorLayout.getSubgroupOrder(),
+                      [&](int64_t i) { return filteredSubgroupIds[i]; }));
   threadIndices = llvm::to_vector(
       llvm::map_range(vectorLayout.getThreadOrder(),
-                      [&](int64_t i) { return threadIds[i + rank]; }));
+                      [&](int64_t i) { return filteredThreadIds[i]; }));
 }
 
 namespace {
 
 /// Pattern to distribute `vector.transfer_read` ops with nested layouts.
-struct DistributeTransferReadNestedLayoutAttr final
+struct DistributeTransferRead final
     : OpDistributionPattern<vector::TransferReadOp> {
   using OpDistributionPattern::OpDistributionPattern;
 
-  DistributeTransferReadNestedLayoutAttr(MLIRContext *context, Value threadId)
+  DistributeTransferRead(MLIRContext *context, Value threadId)
       : OpDistributionPattern(context), threadId(threadId) {}
 
   LogicalResult matchAndRewrite(vector::TransferReadOp readOp,
@@ -179,18 +198,20 @@ struct DistributeTransferReadNestedLayoutAttr final
                                 PatternRewriter &rewriter) const override {
     // TODO: Support masking.
     if (readOp.getMask()) {
-      return failure();
+      return rewriter.notifyMatchFailure(readOp, "unimplemented: masked read");
     }
     NestedLayoutAttr vectorLayout =
         dyn_cast<NestedLayoutAttr>(signature[readOp.getResult()]);
     if (!vectorLayout) {
-      return failure();
+      return rewriter.notifyMatchFailure(readOp,
+                                         "non-nested transfer_read layout");
     }
 
     // Guard on memrefs for distribution. In isolation this pattern is agnostic
     // to tensors or memrefs.
     if (!isa<MemRefType>(readOp.getSource().getType())) {
-      return failure();
+      return rewriter.notifyMatchFailure(readOp,
+                                         "distribution expects memrefs");
     }
 
     SmallVector<int64_t> distShape = vectorLayout.getDistributedShape();
@@ -245,11 +266,11 @@ struct DistributeTransferReadNestedLayoutAttr final
 };
 
 /// Pattern to distribute `vector.transfer_write` ops with nested layouts.
-struct DistributeTransferWriteNestedLayoutAttr final
+struct DistributeTransferWrite final
     : OpDistributionPattern<vector::TransferWriteOp> {
   using OpDistributionPattern::OpDistributionPattern;
 
-  DistributeTransferWriteNestedLayoutAttr(MLIRContext *context, Value threadId)
+  DistributeTransferWrite(MLIRContext *context, Value threadId)
       : OpDistributionPattern(context), threadId(threadId) {}
 
   LogicalResult matchAndRewrite(vector::TransferWriteOp writeOp,
@@ -257,16 +278,19 @@ struct DistributeTransferWriteNestedLayoutAttr final
                                 PatternRewriter &rewriter) const override {
     // TODO: Support masking.
     if (writeOp.getMask()) {
-      return failure();
+      return rewriter.notifyMatchFailure(writeOp,
+                                         "unimplemented: masked write");
     }
     NestedLayoutAttr vectorLayout =
         dyn_cast<NestedLayoutAttr>(signature[writeOp.getVector()]);
     if (!vectorLayout) {
-      return failure();
+      return rewriter.notifyMatchFailure(writeOp,
+                                         "non-nested transfer_write layout");
     }
 
     if (!isa<MemRefType>(writeOp.getSource().getType())) {
-      return failure();
+      return rewriter.notifyMatchFailure(writeOp,
+                                         "distribution expects memrefs");
     }
 
     SmallVector<int64_t> distShape = vectorLayout.getDistributedShape();
@@ -314,13 +338,118 @@ struct DistributeTransferWriteNestedLayoutAttr final
   Value threadId;
 };
 
+struct DistributeBroadcast final : OpDistributionPattern<vector::BroadcastOp> {
+  using OpDistributionPattern::OpDistributionPattern;
+
+  LogicalResult matchAndRewrite(vector::BroadcastOp broadcastOp,
+                                DistributionSignature &signature,
+                                PatternRewriter &rewriter) const override {
+
+    VectorValue srcVector = dyn_cast<VectorValue>(broadcastOp.getSource());
+    if (!srcVector) {
+      // TODO: Add support for scalar broadcasting.
+      return rewriter.notifyMatchFailure(
+          broadcastOp, "unimplemented: scalar broadcast distribution");
+    }
+    auto sourceLayout = dyn_cast<NestedLayoutAttr>(signature[srcVector]);
+    if (!sourceLayout) {
+      return rewriter.notifyMatchFailure(broadcastOp,
+                                         "non-nested source vector layout");
+    }
+
+    VectorValue dstVector = broadcastOp.getVector();
+    auto vectorLayout = dyn_cast<NestedLayoutAttr>(signature[dstVector]);
+    if (!vectorLayout) {
+      return rewriter.notifyMatchFailure(broadcastOp,
+                                         "non-nested result vector layout");
+    }
+
+    SmallVector<int64_t> distShape = vectorLayout.getDistributedShape();
+    Type elementType =
+        llvm::cast<ShapedType>(dstVector.getType()).getElementType();
+    auto vectorType = VectorType::get(distShape, elementType);
+    Location loc = broadcastOp.getLoc();
+    Value accumulator = rewriter.create<arith::ConstantOp>(
+        loc, vectorType, rewriter.getZeroAttr(vectorType));
+
+    int64_t rank = vectorLayout.getBatchOrder().size();
+    int64_t sourceRank = sourceLayout.getBatchOrder().size();
+    // We unroll along both the batch and outer dimensions for a similar reason
+    // to the transfer ops. `vector.broadcast` can only broadcast along outer
+    // dims, so mixing broadcasted and un-broadcasted element/outer dims can't
+    // be represented with a single `vector.broadcast`.
+    SmallVector<int64_t> resultVectorUnrollShape =
+        getElementVectorTileShape(vectorLayout);
+    SmallVector<int64_t> loopOrder = getLoopOrder(vectorLayout);
+
+    Value distributedSource = getDistributed(rewriter, srcVector, sourceLayout);
+
+    VectorType broadcastTargetType =
+        VectorType::get(applyPermutation(vectorLayout.getElementsPerThread(),
+                                         vectorLayout.getElementOrder()),
+                        elementType);
+    for (SmallVector<int64_t> offsets :
+         StaticTileOffsetRange(distShape, resultVectorUnrollShape, loopOrder)) {
+      ArrayRef<int64_t> offsetsRef(offsets);
+      // Invert the permutations on the batch/outer offsets to get the offsets
+      // in the order of the vector dimensions. We are iterating over each
+      // (batch x outer) tile, and the offsets for those tiles are already
+      // permuted by the layout batch/outer orders. Hence why we apply the
+      // inverse permutation here.
+      SmallVector<int64_t> permutedBatchOffsets = applyPermutation(
+          offsetsRef.slice(0, rank),
+          invertPermutationVector(vectorLayout.getBatchOrder()));
+      SmallVector<int64_t> permutedOuterOffsets = applyPermutation(
+          offsetsRef.slice(rank, rank),
+          invertPermutationVector(vectorLayout.getOuterOrder()));
+
+      // Slice out the last |sourceRank| dimensions which is the inner
+      // broadcasted shape.
+      ArrayRef<int64_t> batchSourceOffsets =
+          ArrayRef<int64_t>(permutedBatchOffsets)
+              .slice(rank - sourceRank, sourceRank);
+      ArrayRef<int64_t> outerSourceOffsets =
+          ArrayRef<int64_t>(permutedOuterOffsets)
+              .slice(rank - sourceRank, sourceRank);
+
+      // Construct the list of source offsets based on the batch/outer order of
+      // the broadcasted vector. This is because we need to compute the offsets
+      // into the distributed source vector with the distributed permutation.
+      SmallVector<int64_t> sourceOffsets;
+      sourceOffsets.append(
+          applyPermutation(batchSourceOffsets, sourceLayout.getBatchOrder()));
+      sourceOffsets.append(
+          applyPermutation(outerSourceOffsets, sourceLayout.getOuterOrder()));
+
+      // Extract a slice of the input to be broadcasted.
+      Value slice = rewriter.create<vector::ExtractOp>(loc, distributedSource,
+                                                       sourceOffsets);
+      // TODO: Support non-trivial element orders.
+      if (vector::isBroadcastableTo(slice.getType(), broadcastTargetType) !=
+          vector::BroadcastableToResult::Success) {
+        return rewriter.notifyMatchFailure(
+            broadcastOp,
+            "unimplemented: non-trivial broadcast source element order");
+      }
+      Value broadcastedSlice =
+          rewriter.create<vector::BroadcastOp>(loc, broadcastTargetType, slice);
+      // Insert into the broadcasted destination vector.
+      accumulator = rewriter.create<vector::InsertOp>(
+          loc, broadcastedSlice, accumulator, offsetsRef.take_front(rank * 2));
+    }
+
+    replaceOpWithDistributedValues(rewriter, broadcastOp, accumulator);
+    return success();
+  }
+};
+
 } // namespace
 
 void populateGPUDistributeNestedLayoutAttrPatterns(
     Value threadId, RewritePatternSet &patterns) {
-  patterns.add<DistributeTransferReadNestedLayoutAttr,
-               DistributeTransferWriteNestedLayoutAttr>(patterns.getContext(),
-                                                        threadId);
+  patterns.add<DistributeTransferRead, DistributeTransferWrite>(
+      patterns.getContext(), threadId);
+  patterns.add<DistributeBroadcast>(patterns.getContext());
 }
 
 }; // namespace mlir::iree_compiler

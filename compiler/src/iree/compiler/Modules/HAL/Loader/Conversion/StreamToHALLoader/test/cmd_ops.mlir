@@ -67,9 +67,10 @@ util.func public @cmdDispatch(%buffer0: !stream.resource<transient>, %buffer0_si
     // CHECK-DAG: %[[COUNT_Y:.+]] = arith.constant 251
     // CHECK-DAG: %[[COUNT_Z:.+]] = arith.constant 1
 
+    // CHECK-DAG: %[[ORDINAL:.+]] = hal_loader.executable.export.ordinal target(@ex::@variant::@dispatch) : index
+
     //      CHECK: hal_loader.executable.dispatch
-    // CHECK-SAME:   executable(%[[EXECUTABLE]] : !hal.executable)
-    // CHECK-SAME:   target(@ex::@variant::@dispatch)
+    // CHECK-SAME:   executable(%[[EXECUTABLE]] : !hal.executable)[%[[ORDINAL]]]
     // CHECK-SAME:   workgroups([%[[COUNT_X]], %[[COUNT_Y]], %[[COUNT_Z]]])
     // CHECK-SAME:   constants([%[[CONSTANT0]], %[[CONSTANT1]]])
     // CHECK-SAME:   bindings([
@@ -79,11 +80,6 @@ util.func public @cmdDispatch(%buffer0: !stream.resource<transient>, %buffer0_si
     stream.cmd.dispatch @ex::@dispatch[%workload_x, %workload_y](%constant0, %constant1 : i32, i32) {
       ro %buffer0_inner[%buffer0_offset for %buffer0_length] : !stream.resource<transient>{%buffer0_size},
       wo %buffer1_inner[%buffer1_offset for %buffer1_length] : !stream.resource<external>{%buffer1_size}
-    } attributes {
-      hal.interface.bindings = [
-        #hal.interface.binding<0, 4>,
-        #hal.interface.binding<1, 5>
-      ]
     }
   } => !stream.timepoint
   // CHECK: return %c0

@@ -49,6 +49,9 @@ struct Binding {
 struct DispatchParams {
   // All locations that dispatch with these parameters.
   SmallVector<Location> locs;
+  // All affinities that dispatch with these parameters.
+  // Empty if no affinities were specified.
+  SetVector<IREE::Stream::AffinityAttr> affinities;
   // Workload used as input to the workgroup count calculation function.
   SmallVector<unsigned> workload;
   // Analyzed minimum binding sizes.
@@ -58,23 +61,20 @@ struct DispatchParams {
 };
 
 using DispatchParamsMap =
-    llvm::DenseMap<SymbolRefAttr, llvm::SmallVector<DispatchParams>>;
+    llvm::DenseMap<SymbolRefAttr, std::vector<DispatchParams>>;
 
 // Walk |moduleOp| and gather all of the dispatches to each executable.
 // Dispatch parameters are deduplicated by workload so that there's only ever
 // one entry for all dispatches with a given workgroup count.
 // Dispatches will be ignored if they have a dynamic workload or any dynamically
 // sized resources.
-static DispatchParamsMap gatherDispatchParams(mlir::ModuleOp moduleOp) {
+static DispatchParamsMap gatherDispatchParams(mlir::ModuleOp moduleOp,
+                                              SymbolTable &symbolTable) {
   DispatchParamsMap map;
 
   for (auto funcOp : moduleOp.getOps<mlir::FunctionOpInterface>()) {
     funcOp.walk([&](IREE::Stream::CmdDispatchOp dispatchOp) {
-      // TODO(benvanik): typed accessors for bindings.
-      auto bindingAttrs = llvm::dyn_cast_if_present<ArrayAttr>(
-          dispatchOp->getAttr("hal.interface.bindings"));
-      assert(bindingAttrs &&
-             "interface materialization must annotate dispatch sites");
+      auto affinityAttr = IREE::Stream::AffinityAttr::lookup(dispatchOp);
 
       auto workloadValues = dispatchOp.getWorkload();
       SmallVector<unsigned> workload;
@@ -90,25 +90,6 @@ static DispatchParamsMap gatherDispatchParams(mlir::ModuleOp moduleOp) {
           return;
         }
         workload.push_back(workloadConstValue.getSExtValue());
-      }
-
-      SmallVector<Binding> bindings;
-      for (auto [bindingAttr, resourceLength] : llvm::zip_equal(
-               bindingAttrs.getAsRange<IREE::HAL::InterfaceBindingAttr>(),
-               dispatchOp.getResourceLengths())) {
-        APInt resourceLengthInt;
-        if (!matchPattern(resourceLength, m_ConstantInt(&resourceLengthInt))) {
-          LLVM_DEBUG({
-            auto firstEntryPoint = *dispatchOp.getEntryPointRefs().begin();
-            llvm::dbgs() << "Skipping dispatch of entry point `"
-                         << firstEntryPoint
-                         << "` (non-constant resource length)\n";
-          });
-          return;
-        }
-        bindings.push_back({(unsigned)bindingAttr.getSet(),
-                            (unsigned)bindingAttr.getBinding(),
-                            resourceLengthInt.getSExtValue()});
       }
 
       SmallVector<TypedAttr> uniformOperands;
@@ -130,6 +111,28 @@ static DispatchParamsMap gatherDispatchParams(mlir::ModuleOp moduleOp) {
 
       // Work around needing a mutable key for the set; C++ was a mistake.
       dispatchOp.forEachEntryPointAttr([&](SymbolRefAttr entryPointAttr) {
+        auto exportOp =
+            symbolTable.lookupNearestSymbolFrom<IREE::HAL::ExecutableExportOp>(
+                dispatchOp, entryPointAttr);
+        auto bindingAttrs = IREE::HAL::getInterfaceBindingAttrs(
+            exportOp, dispatchOp.getResources().size());
+
+        SmallVector<Binding> bindings;
+        for (auto [bindingAttr, resourceLength] :
+             llvm::zip_equal(bindingAttrs, dispatchOp.getResourceLengths())) {
+          APInt resourceLengthInt;
+          if (!matchPattern(resourceLength,
+                            m_ConstantInt(&resourceLengthInt))) {
+            LLVM_DEBUG(llvm::dbgs() << "Skipping dispatch of entry point `"
+                                    << entryPointAttr
+                                    << "` (non-constant resource length)\n";);
+            return;
+          }
+          bindings.push_back({(unsigned)bindingAttr.getSet(),
+                              (unsigned)bindingAttr.getBinding(),
+                              resourceLengthInt.getSExtValue()});
+        }
+
         auto &dispatchParamsSet = map[entryPointAttr];
         DispatchParams *dispatchParams = nullptr;
         for (auto &it : dispatchParamsSet) {
@@ -143,6 +146,7 @@ static DispatchParamsMap gatherDispatchParams(mlir::ModuleOp moduleOp) {
           dispatchParams = &dispatchParamsSet.back();
         }
         dispatchParams->locs.push_back(dispatchOp.getLoc());
+        dispatchParams->affinities.insert(affinityAttr);
         dispatchParams->workload = workload;
         dispatchParams->bindings = std::move(bindings);
         dispatchParams->uniformOperands = std::move(uniformOperands);
@@ -203,7 +207,8 @@ appendGlobalBuffer(Location loc, StringRef baseName,
 //
 // Expects the runner to pass an i32 value indicating the number of dispatches
 // to be made in one submission.
-static void appendDispatchBenchmark(IREE::HAL::ExecutableOp executableOp,
+static void appendDispatchBenchmark(IREE::Stream::AffinityAttr affinityAttr,
+                                    IREE::HAL::ExecutableOp executableOp,
                                     IREE::HAL::ExecutableVariantOp variantOp,
                                     IREE::HAL::ExecutableExportOp exportOp,
                                     DispatchParams dispatchParams,
@@ -249,6 +254,7 @@ static void appendDispatchBenchmark(IREE::HAL::ExecutableOp executableOp,
       loc, funcBuilder.getIndexType(), entryBlock->getArgument(0));
 
   // TODO(multi-device): support multiple devices in benchmark generation.
+  // For now we should just use the affinityAttr to resolve the device.
   Value device = IREE::HAL::DeviceType::resolveAny(loc, funcBuilder);
 
   // Create and begin command buffer.
@@ -331,6 +337,13 @@ static void appendDispatchBenchmark(IREE::HAL::ExecutableOp executableOp,
           loc, funcBuilder.getIndexType(), funcBuilder.getIndexType(),
           funcBuilder.getIndexType(), device, exportRefAttr, workload);
 
+  // Get the executable/entry point ordinal used to dispatch.
+  Value executable = funcBuilder.create<IREE::HAL::ExecutableLookupOp>(
+      loc, funcBuilder.getType<IREE::HAL::ExecutableType>(), device,
+      exportRefAttr.getRootReference().getValue());
+  Value ordinal = funcBuilder.create<IREE::HAL::ExecutableExportOrdinalOp>(
+      loc, funcBuilder.getIndexType(), exportRefAttr);
+
   // Loop around dispatches based on batch size.
   // Note that we insert a barrier between each dispatch - we could make this
   // optional so that concurrent utilization is measured.
@@ -338,9 +351,10 @@ static void appendDispatchBenchmark(IREE::HAL::ExecutableOp executableOp,
       loc, indexSet.get(0), batchSizeArg, indexSet.get(1), ValueRange{},
       [&](OpBuilder &forBuilder, Location loc, Value iv, ValueRange iters) {
         // Dispatch.
-        forBuilder.create<IREE::HAL::CommandBufferDispatchSymbolOp>(
-            loc, commandBuffer, exportRefAttr, workgroupCountOp.getWorkgroupX(),
-            workgroupCountOp.getWorkgroupY(), workgroupCountOp.getWorkgroupZ());
+        forBuilder.create<IREE::HAL::CommandBufferDispatchOp>(
+            loc, commandBuffer, executable, ordinal,
+            workgroupCountOp.getWorkgroupX(), workgroupCountOp.getWorkgroupY(),
+            workgroupCountOp.getWorkgroupZ());
 
         // Barrier following the dispatch to block the next dispatch.
         auto sourceStage = IREE::HAL::ExecutionStageBitfield::CommandRetire |
@@ -420,8 +434,15 @@ buildBenchmarkModule(IREE::HAL::ExecutableOp sourceExecutableOp,
     auto dispatchParamsSet = dispatchParamsMap.find(symbolRefAttr);
     if (dispatchParamsSet != dispatchParamsMap.end()) {
       for (auto &dispatchParams : dispatchParamsSet->second) {
-        appendDispatchBenchmark(executableOp, variantOp, exportOp,
-                                dispatchParams, moduleBuilder);
+        if (dispatchParams.affinities.empty()) {
+          appendDispatchBenchmark({}, executableOp, variantOp, exportOp,
+                                  dispatchParams, moduleBuilder);
+        } else {
+          for (auto affinityAttr : dispatchParams.affinities) {
+            appendDispatchBenchmark(affinityAttr, executableOp, variantOp,
+                                    exportOp, dispatchParams, moduleBuilder);
+          }
+        }
         hasAnyBenchmarks = true;
       }
     }
@@ -463,12 +484,13 @@ struct DumpExecutableBenchmarksPass
   void runOnOperation() override {
     auto moduleOp = getOperation();
     auto moduleName = moduleOp.getName().value_or("module");
+    SymbolTable symbolTable(moduleOp);
 
     // Analyze the module to find dispatch parameters.
     // This is a full walk of all stream.cmd.dispatch ops and will handle
     // filtering out dispatches that have dynamic parameters we don't
     // currently support.
-    auto dispatchParamsMap = gatherDispatchParams(moduleOp);
+    auto dispatchParamsMap = gatherDispatchParams(moduleOp, symbolTable);
     if (dispatchParamsMap.empty()) {
       mlir::emitRemark(moduleOp.getLoc())
           << "Executable benchmarks were requested but none were generated. "

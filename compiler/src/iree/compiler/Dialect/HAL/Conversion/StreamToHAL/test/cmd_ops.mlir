@@ -166,9 +166,10 @@ util.func public @cmdExecute(%arg0: !stream.resource<transient>, %arg1: index, %
 
 #executable_target_aarch64 = #hal.executable.target<"llvm-cpu", "embedded-elf-aarch64">
 #executable_target_x86_64 = #hal.executable.target<"llvm-cpu", "embedded-elf-x86_64">
-#device_target_cpu = #hal.device.target<"llvm-cpu", {
-  executable_targets = [#executable_target_aarch64, #executable_target_x86_64]
-}>
+#device_target_cpu = #hal.device.target<"llvm-cpu", [
+  #executable_target_aarch64,
+  #executable_target_x86_64
+]>
 #pipeline_layout = #hal.pipeline.layout<push_constants = 0, sets = [
   #hal.descriptor_set.layout<0, bindings = [
     #hal.descriptor_set.binding<4, storage_buffer>
@@ -184,6 +185,10 @@ hal.executable private @ex {
       hal.return %selected : i1
     }
     hal.executable.export public @dispatch ordinal(0) layout(#pipeline_layout) attributes {
+      hal.interface.bindings = [
+        #hal.interface.binding<0, 4>,
+        #hal.interface.binding<1, 5>
+      ],
       translation_info = #iree_codegen.translation_info<CPUDefault>
     } {
     ^bb0(%device: !hal.device, %arg0: index, %arg1: index, %arg2: index):  // no predecessors
@@ -197,6 +202,10 @@ hal.executable private @ex {
   }
   hal.executable.variant public @x86_64 target(#executable_target_x86_64) {
     hal.executable.export public @dispatch ordinal(0) layout(#pipeline_layout) attributes {
+      hal.interface.bindings = [
+        #hal.interface.binding<0, 4>,
+        #hal.interface.binding<1, 5>
+      ],
       translation_info = #iree_codegen.translation_info<CPUDefault>
     } {
     ^bb0(%device: !hal.device, %arg0: index, %arg1: index, %arg2: index):  // no predecessors
@@ -256,23 +265,26 @@ util.func public @cmdDispatch(%arg0: !stream.resource<transient>, %arg1: index, 
     // CHECK: %[[YZ:.+]] = arith.constant 1 : index
     // CHECK-NEXT: %[[X:.+]] = affine.apply #map()[%c1]
 
+    // Target executable/export:
+    //  CHECK-DAG: %[[EXECUTABLE_0:.+]] = hal.executable.lookup
+    // CHECK-SAME:     device(%[[DEVICE]] : !hal.device)
+    // CHECK-SAME:     executable(@ex) : !hal.executable
+    //  CHECK-DAG: %[[ORDINAL_0:.+]] = hal.executable.export.ordinal
+    // CHECK-SAME:     target(@ex::@aarch64::@dispatch) : index
+
     // Dispatch:
-    // CHECK: hal.command_buffer.dispatch.symbol<%[[CMD]]
-    // CHECK-SAME: target(@ex::@aarch64::@dispatch)
+    // CHECK: hal.command_buffer.dispatch<%[[CMD]]
+    // CHECK-SAME: target(%[[EXECUTABLE_0]] : !hal.executable)[%[[ORDINAL_0]]]
     // CHECK-SAME: workgroups([%[[X]], %[[YZ]], %[[YZ]]])
 
     // Other variant, when selected:
     // CHECK: case 1 {
-    // CHECK: hal.command_buffer.dispatch.symbol<%[[CMD]]
-    // CHECK-SAME: target(@ex::@x86_64::@dispatch)
+    // CHECK-DAG: %[[ORDINAL_1:.+]] = hal.executable.export.ordinal target(@ex::@x86_64::@dispatch)
+    // CHECK: hal.command_buffer.dispatch<%[[CMD]]
+    // CHECK-SAME: target({{.+}})[%[[ORDINAL_1]]]
     stream.cmd.dispatch {@ex::@aarch64::@dispatch, @ex::@x86_64::@dispatch}[%c1, %c2, %c3](%c4_i32, %c5_i32 : i32, i32) {
       ro %arg4[%c0 for %c128] : !stream.resource<transient>{%arg1},
       wo %arg5[%c0 for %c128] : !stream.resource<external>{%arg3}
-    } attributes {
-      hal.interface.bindings = [
-        #hal.interface.binding<0, 4>,
-        #hal.interface.binding<1, 5>
-      ]
     }
     // CHECK: hal.command_buffer.execution_barrier<%[[CMD]]
   } => !stream.timepoint

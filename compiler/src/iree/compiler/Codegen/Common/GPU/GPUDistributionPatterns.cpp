@@ -13,6 +13,7 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Attributes.h"
@@ -115,12 +116,18 @@ struct DistributeConstants final : OpDistributionPattern<arith::ConstantOp> {
   }
 };
 
-template <typename OpTy>
-struct DistributeElementwise final : OpDistributionPattern<OpTy> {
-  using OpDistributionPattern<OpTy>::OpDistributionPattern;
+struct DistributeElementwise final
+    : OpTraitDistributionPattern<OpTrait::Elementwise> {
+  using OpTraitDistributionPattern::OpTraitDistributionPattern;
 
-  LogicalResult matchAndRewrite(OpTy op, DistributionSignature &signature,
+  LogicalResult matchAndRewrite(Operation *op, DistributionSignature &signature,
                                 PatternRewriter &rewriter) const override {
+    // Check if this operation has elementwise mappable traits. This is
+    // more restricted than only having elementwise trait.
+    if (!OpTrait::hasElementwiseMappableTraits(op)) {
+      return failure();
+    }
+
     // Get the distributed operands.
     SmallVector<Value> operands;
     for (Value operand : op->getOperands()) {
@@ -365,19 +372,27 @@ struct DistributeReductions final
   DistributeReductions(MLIRContext *context, int64_t maxBitsPerShuffle)
       : OpDistributionPattern(context), maxBitsPerShuffle(maxBitsPerShuffle) {}
 
+  static constexpr int64_t kDefaultSubgroupSize = 32;
+
   // Do parallel reduction using butterfly shuffles.
   Value doThreadGlobalReduction(Value result, uint64_t shuffleOffset,
                                 int64_t laneSize,
                                 vector::CombiningKind combiningKind,
                                 int64_t entriesPerVector, Value mEmpty,
                                 OpBuilder &rewriter, Location loc) const {
-    uint32_t size = maxBitsPerShuffle;
+    auto funcOp = result.getDefiningOp()->getParentOfType<func::FuncOp>();
+    std::optional<int64_t> maybeSubgroupSize = getSubgroupSize(funcOp);
+    if (!maybeSubgroupSize)
+      funcOp->emitWarning("No subgroup size specified, using default value = " +
+                          Twine(kDefaultSubgroupSize));
+    int64_t subgroupSize = maybeSubgroupSize.value_or(kDefaultSubgroupSize);
+
     Value mask;
     assert(llvm::isPowerOf2_64(laneSize));
     for (uint64_t i = shuffleOffset; i < shuffleOffset * laneSize; i <<= 1) {
       Value packed = packVectorToSupportedWidth(loc, rewriter, result);
-      auto shuffleOp = rewriter.create<gpu::ShuffleOp>(loc, packed, i, size,
-                                                       gpu::ShuffleMode::XOR);
+      auto shuffleOp = rewriter.create<gpu::ShuffleOp>(
+          loc, packed, i, subgroupSize, gpu::ShuffleMode::XOR);
       Value unpacked =
           unpackToVector(loc, rewriter, shuffleOp.getShuffleResult(),
                          result.getType().cast<VectorType>());
@@ -608,7 +623,8 @@ struct DistributeTranspose final : OpDistributionPattern<vector::TransposeOp> {
                                 DistributionSignature &signature,
                                 PatternRewriter &rewriter) const override {
     VectorValue value = transposeOp.getVector();
-    LayoutAttr layout = dyn_cast<LayoutAttr>(signature[value]);
+    VectorLayoutInterface layout =
+        dyn_cast<VectorLayoutInterface>(signature[value]);
     if (!layout) {
       return failure();
     }
@@ -825,10 +841,7 @@ void populateGPUReductionDistributionPatterns(RewritePatternSet &patterns,
 void populateGPUDistributionPatterns(RewritePatternSet &patterns) {
   patterns.add<DistributeConstants, DistributeScfFor>(patterns.getContext());
   // Elementwise patterns.
-  patterns.add<DistributeElementwise<arith::MulIOp>,
-               DistributeElementwise<arith::MulFOp>,
-               DistributeElementwise<arith::AddIOp>,
-               DistributeElementwise<arith::AddFOp>>(patterns.getContext());
+  patterns.add<DistributeElementwise>(patterns.getContext());
 }
 
 void populateGPUDistributionLayoutAttrPatterns(Value laneId,

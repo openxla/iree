@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "iree-dialects/Dialect/LinalgExt/Passes/Passes.h"
+#include "iree/compiler/Dialect/LinalgExt/Transforms/Passes.h"
 
 #include "iree-dialects/Dialect/LinalgTransform/Passes.h"
 #include "iree/compiler/Codegen/Common/GPU/Passes.h"
@@ -328,8 +328,7 @@ void addSPIRVBaseVectorizePassPipeline(OpPassManager &pm) {
   nestedModulePM.addPass(createCSEPass());
 
   // Tile to GPU invocations and vectorize.
-  nestedModulePM.addNestedPass<func::FuncOp>(
-      createSPIRVCreateFastSlowPathPass());
+  nestedModulePM.addNestedPass<func::FuncOp>(createGPUCreateFastSlowPathPass());
   nestedModulePM.addNestedPass<func::FuncOp>(createSPIRVTilePass());
   nestedModulePM.addPass(createCanonicalizerPass());
   nestedModulePM.addPass(createCSEPass());
@@ -597,7 +596,6 @@ void addSPIRVSubgroupReducePassPipeline(OpPassManager &pm) {
     options.vectorizeGatherAccesses = true;
     options.enableCleanup = false;
     options.generateContract = false;
-    options.maxVectorSize = 32768;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -664,9 +662,9 @@ void addSPIRVTransformDialectPassPipeline(OpPassManager &pm,
 //===----------------------------------------------------------------------===//
 
 void buildSPIRVCodegenConfigurationPassPipeline(OpPassManager &pm) {
-  addCommonTargetExecutablePreprocessingPasses(pm);
   auto &nestedModulePM = pm.nest<ModuleOp>();
   nestedModulePM.addNestedPass<func::FuncOp>(createGPUGeneralizeNamedOpsPass());
+  addCommonTargetExecutablePreprocessingPasses(pm);
   pm.addPass(createSPIRVSelectLoweringStrategyPass());
 }
 

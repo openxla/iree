@@ -562,7 +562,7 @@ iree_status_t iree_hal_cuda_nccl_submit_batch(
         __FUNCTION__, strlen(__FUNCTION__), collective_str.data,
         collective_str.size);
   }
-#endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
+#endif  // IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
 
   // Issue all collective operations in the batch as part of a group.
   // NCCL may be able to fuse or reduce overheads by issuing like this.

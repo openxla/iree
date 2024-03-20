@@ -58,6 +58,9 @@ void addGPUWarpReductionPassPipeline(OpPassManager &pm);
 /// Default pass pipeline on GPU, currently used only for the ukernel path.
 void addGPUDefaultPassPipeline(OpPassManager &pm, bool enableMicrokernels);
 
+/// Pass pipeline to lower IREE HAL executables without tiling and distribution.
+void addGPUBaseLoweringPassPipeline(OpPassManager &pm);
+
 /// Populates passes needed to preprocess and select the translation strategy.
 void buildLLVMGPUCodegenConfigurationPassPipeline(OpPassManager &pm);
 
@@ -76,6 +79,11 @@ std::unique_ptr<OperationPass<ModuleOp>> createConvertToROCDLPass();
 std::unique_ptr<OperationPass<ModuleOp>>
 createLLVMGPUCastAddressSpaceFunction();
 
+/// Perform type extension/truncation over vector.contract types to target GPU
+/// MMA intrinsics.
+std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
+createLLVMGPUCastTypeToFitMMAPass();
+
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createLLVMGPUDistribute();
 
@@ -91,6 +99,9 @@ createLLVMGPULowerExecutableTargetPass();
 // usage.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createLLVMGPUPackSharedMemoryAlloc();
+
+std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
+createLLVMGPUPrefetchSharedMemoryPass();
 
 enum class GPUTensorCoreType {
   WMMA = 0,
