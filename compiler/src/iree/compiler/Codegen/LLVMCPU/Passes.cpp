@@ -396,6 +396,8 @@ void addMultiTilingExpertPassPipeline(OpPassManager &passManager,
   if (pipelineOpt.enablePeeling) {
     nestedModulePM.addNestedPass<func::FuncOp>(createLLVMCPUPeelPass());
   }
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createDecomposeMatmulTransposeBPass());
 
   {
     nestedModulePM.addNestedPass<func::FuncOp>(createVectorizePadPass());
