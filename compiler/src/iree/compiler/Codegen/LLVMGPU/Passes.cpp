@@ -771,7 +771,7 @@ void addGPUConvVectorDistributePassPipeline(OpPassManager &pm) {
       memref::createFoldMemRefAliasOpsPass());
   nestedModulePM.addNestedPass<func::FuncOp>(createMemrefCopyToLinalgPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
-      createLLVMGPUDistributeSharedMemcpyV2Pass());
+      createGPUDistributeSharedMemoryCopy());
   nestedModulePM.addNestedPass<func::FuncOp>(createGPUDistribute());
   {
     GenericVectorizationPassOptions options;
