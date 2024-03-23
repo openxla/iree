@@ -418,6 +418,20 @@ void addMultiTilingExpertPassPipeline(OpPassManager &passManager,
 
   addCPUBufferizePasses(nestedModulePM);
 
+  // The copy operation is disappearing after vectorization. In this case,
+  // bufferization creates a linalg.generic op that copies data from source to
+  // destination. We call the vectorizer again to vectorize copy ops. (Example
+  // in test case in bug#15249). This is a good stop-gap fix till we find a more
+  // appropriate fix.
+  {
+    GenericVectorizationPassOptions options;
+    options.enableVectorMasking = enableVectorMasking;
+    options.vectorizePadding = true;
+    options.vectorizeGatherAccesses = true;
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createGenericVectorizationPass(options));
+  }
+
   // Run IREE specific passes before vector lowering expert.
   nestedModulePM.addNestedPass<func::FuncOp>(
       createRemoveSingleIterationLoopPass());
