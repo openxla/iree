@@ -112,7 +112,7 @@ void iree_hal_cuda_tracing_zone_end_impl(
     function_name_length, name, name_length)
 #define IREE_CUDA_TRACE_ZONE_END(context, stream)
 
-#endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION
+#endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
 
 #ifdef __cplusplus
 }  // extern "C"
