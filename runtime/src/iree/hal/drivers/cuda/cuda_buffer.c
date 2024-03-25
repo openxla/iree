@@ -28,9 +28,13 @@ static iree_hal_cuda_buffer_t* iree_hal_cuda_buffer_cast(
   return (iree_hal_cuda_buffer_t*)base_value;
 }
 
-static const iree_hal_cuda_buffer_t* iree_hal_cuda_buffer_const_cast(
+static iree_hal_cuda_buffer_t* iree_hal_cuda_buffer_cast_unsafe(
+    iree_hal_buffer_t* base_value) {
+  return (iree_hal_cuda_buffer_t*)base_value;
+}
+
+static const iree_hal_cuda_buffer_t* iree_hal_cuda_buffer_const_cast_unsafe(
     const iree_hal_buffer_t* base_value) {
-  IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_cuda_buffer_vtable);
   return (const iree_hal_cuda_buffer_t*)base_value;
 }
 
@@ -142,20 +146,20 @@ static iree_status_t iree_hal_cuda_buffer_flush_range(
 iree_hal_cuda_buffer_type_t iree_hal_cuda_buffer_type(
     const iree_hal_buffer_t* base_buffer) {
   const iree_hal_cuda_buffer_t* buffer =
-      iree_hal_cuda_buffer_const_cast(base_buffer);
+      iree_hal_cuda_buffer_const_cast_unsafe(base_buffer);
   return buffer->type;
 }
 
 CUdeviceptr iree_hal_cuda_buffer_device_pointer(
     const iree_hal_buffer_t* base_buffer) {
   const iree_hal_cuda_buffer_t* buffer =
-      iree_hal_cuda_buffer_const_cast(base_buffer);
+      iree_hal_cuda_buffer_const_cast_unsafe(base_buffer);
   return buffer->device_ptr;
 }
 
 void* iree_hal_cuda_buffer_host_pointer(const iree_hal_buffer_t* base_buffer) {
   const iree_hal_cuda_buffer_t* buffer =
-      iree_hal_cuda_buffer_const_cast(base_buffer);
+      iree_hal_cuda_buffer_const_cast_unsafe(base_buffer);
   return buffer->host_ptr;
 }
 
