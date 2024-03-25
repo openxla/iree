@@ -248,47 +248,6 @@ static FailureOr<tensor::PackOp> lowerSetEncodingOpToPackOp(
       *innerTileSizesOfr, paddingValue, materializeEncodingInfo->outerDimsPerm);
 }
 
-static SmallVector<int64_t> reversed(ArrayRef<int64_t> v) {
-  SmallVector<int64_t> result(v.size());
-  for (unsigned i = 0; i < v.size(); ++i)
-    result[v.size() - 1 - i] = v[i];
-  return result;
-}
-
-static RankedTensorType getTransposedType(RankedTensorType tensorType) {
-  SmallVector<int64_t> transposedShape = reversed(tensorType.getShape());
-  IREE::LinalgExt::EncodingAttr encoding =
-      tensorType.getEncoding()
-          .dyn_cast_or_null<IREE::LinalgExt::EncodingAttr>();
-  if (encoding) {
-    auto transposedRole = encoding.getRole().getValue();
-    if (encoding.getRole().getValue() == IREE::LinalgExt::EncodingRole::LHS) {
-      transposedRole = IREE::LinalgExt::EncodingRole::RHS;
-    }
-    if (encoding.getRole().getValue() == IREE::LinalgExt::EncodingRole::RHS) {
-      transposedRole = IREE::LinalgExt::EncodingRole::LHS;
-    }
-    TypeAttr originalTypeAttr = encoding.getOriginalType();
-    TypeAttr transposedOriginalTypeAttr;
-    if (originalTypeAttr) {
-      RankedTensorType originalType = getTransposedType(
-          originalTypeAttr.getValue().cast<RankedTensorType>());
-      transposedOriginalTypeAttr = TypeAttr::get(originalType);
-    }
-    auto transposedEncoding = IREE::LinalgExt::EncodingAttr::get(
-        encoding.getContext(),
-        IREE::LinalgExt::EncodingRoleAttr::get(encoding.getContext(),
-                                               transposedRole),
-        encoding.getElementTypes(), transposedOriginalTypeAttr,
-        encoding.getMatmulNarrow_N(), encoding.getMatmulNarrow_M(),
-        encoding.getUserIndexingMaps());
-    return RankedTensorType::get(transposedShape, tensorType.getElementType(),
-                                 transposedEncoding);
-  } else {
-    return RankedTensorType::get(transposedShape, tensorType.getElementType());
-  }
-}
-
 /// Utility method to convert from `set_encoding` op to `pack` operation.
 /// The source is taken as input so that these could be used with
 /// `OpConversionPatterns`.
