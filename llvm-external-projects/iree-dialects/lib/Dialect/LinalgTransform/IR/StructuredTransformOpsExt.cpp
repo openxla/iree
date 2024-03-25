@@ -718,10 +718,10 @@ matmulCallback(transform_ext::MatchCallbackResult &res, Location loc,
            << "expected one handle to one operation";
   }
 
-  transform_ext::StructuredOpMatcher *pattern, *fill, *trailing;
+  transform_ext::StructuredOpMatcher *pattern, *fill, *leading, *trailing;
   transform_ext::MatchedMatmulCaptures ignore;
   transform_ext::MatcherContext matcherContext;
-  makeMatmulMatcher(matcherContext, pattern, fill, trailing, ignore,
+  makeMatmulMatcher(matcherContext, pattern, fill, leading, trailing, ignore,
                     /*mustMatchEntireFunc=*/true);
 
   // TODO: need a mechanism for this to go around the entire IR,
@@ -744,7 +744,7 @@ matmulCallback(transform_ext::MatchCallbackResult &res, Location loc,
         DBGS() << trailing->getCaptured() << "\n";
     });
 
-    res.addPayloadGroup({fill->getCaptured()});
+    res.addPotentiallyEmptyPayloadGroup(fill->getCaptured());
     res.addPayloadGroup({pattern->getCaptured()});
     res.addPotentiallyEmptyPayloadGroup(trailing->getCaptured());
     return WalkResult::interrupt();

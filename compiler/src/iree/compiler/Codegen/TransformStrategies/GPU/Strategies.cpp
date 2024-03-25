@@ -444,10 +444,11 @@ matchAndSetMatmulStrategy(mlir::FunctionOpInterface entryPoint,
   // 1. Match a reduction and surrounding ops.
   StructuredOpMatcher *fill;
   StructuredOpMatcher *matmul;
+  StructuredOpMatcher *leading;
   StructuredOpMatcher *trailing;
   transform_ext::MatchedMatmulCaptures captures;
   transform_ext::MatcherContext matcherContext;
-  makeMatmulMatcher(matcherContext, matmul, fill, trailing, captures,
+  makeMatmulMatcher(matcherContext, matmul, fill, leading, trailing, captures,
                     /*mustMatchEntireFunc=*/true);
   if (!matchPattern(op, *matmul)) {
     LDBG("--Matmul strategy fail to match\n");
@@ -456,12 +457,12 @@ matchAndSetMatmulStrategy(mlir::FunctionOpInterface entryPoint,
 
   // We are very peculiar about the dispatches we want to match for now:
   //   - f32 only atm.
-  //   - Mandatory fill op.
+  //   - Optional fill op.
   //   - No trailing op.
   //   - If the matmul is "too aligned", then guard on the alignment flag.
   //   - If the matmul is "too small", then use the default IREE strategy.
   //   - Otherwise, we take it.
-  if (!fill->getCaptured() || trailing->getCaptured()) {
+  if (trailing->getCaptured()) {
     LDBG("--Matmul strategy fill / trailing preconditions failed\n");
     return failure();
   }
