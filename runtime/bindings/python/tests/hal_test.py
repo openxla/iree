@@ -13,6 +13,7 @@ import time
 import unittest
 
 
+
 class NonDeviceHalTest(unittest.TestCase):
     def testMemoryEnums(self):
         print("MemoryType:", iree.runtime.MemoryType)
@@ -484,6 +485,14 @@ class DeviceHalTest(unittest.TestCase):
             signal_semaphores=iree.runtime.HalFence.create_at(sem, 1),
         )
         iree.runtime.HalFence.create_at(sem, 1).wait()
+
+class IndexedDeviceHalTest(DeviceHalTest):
+
+  def setUp(self):
+    super().setUp()
+    self.driver = iree.runtime.get_driver("local-task")
+    self.device = self.driver.create_device(0)
+
 
 
 if __name__ == "__main__":
