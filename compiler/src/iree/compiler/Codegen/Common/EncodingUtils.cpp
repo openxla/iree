@@ -5,11 +5,13 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/compiler/Codegen/Common/EncodingUtils.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
 
 #include "llvm/Support/Debug.h"
+#include "mlir/IR/BuiltinAttributes.h"
 
 namespace mlir::iree_compiler {
 
@@ -53,13 +55,26 @@ static RankedTensorType getTransposedType(RankedTensorType tensorType) {
           originalTypeAttr.getValue().cast<RankedTensorType>());
       transposedOriginalTypeAttr = TypeAttr::get(originalType);
     }
+    auto userIndexingMaps = encoding.getUserIndexingMaps();
+    SmallVector<AffineMap> maps;
+    for (auto a : userIndexingMaps) {
+      maps.push_back(cast<AffineMapAttr>(a).getAffineMap());
+    }
+    AffineMap permutation = AffineMap::getPermutationMap(
+        ArrayRef<int64_t>{1, 0, 2}, tensorType.getContext());
+    SmallVector<Attribute> transposedMaps;
+    for (auto m : maps) {
+      transposedMaps.push_back(AffineMapAttr::get(m.compose(permutation)));
+    }
+    ArrayAttr transposedIndexingMaps =
+        ArrayAttr::get(tensorType.getContext(), transposedMaps);
     auto transposedEncoding = IREE::LinalgExt::EncodingAttr::get(
         encoding.getContext(),
         IREE::LinalgExt::EncodingRoleAttr::get(encoding.getContext(),
                                                transposedRole),
         encoding.getElementTypes(), transposedOriginalTypeAttr,
         encoding.getMatmulNarrow_N(), encoding.getMatmulNarrow_M(),
-        encoding.getUserIndexingMaps());
+        transposedIndexingMaps);
     return RankedTensorType::get(transposedShape, tensorType.getElementType(),
                                  transposedEncoding);
   } else {

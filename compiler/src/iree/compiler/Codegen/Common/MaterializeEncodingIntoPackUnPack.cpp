@@ -455,6 +455,8 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
           linalgOp->getLoc(), operands[2].getType(), result->getResult(0), ri);
     }
   }
+  llvm::dbgs() << "lowerContractionOpWithEncoding result: " << *result
+               << "\n\n";
   return result;
 }
 
