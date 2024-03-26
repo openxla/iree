@@ -87,6 +87,12 @@ static llvm::cl::opt<bool> clUseSoftmaxInterFusion(
     llvm::cl::desc("Enables inter-pass fusion for the DecomposeSoftmax pass."),
     llvm::cl::init(true));
 
+static llvm::cl::opt<bool> clDecomposePackUnpack(
+    "iree-llvmcpu-decompose-pack-unpack",
+    llvm::cl::desc(
+        "Enables decomposition for tensor.pack and tensor.unpack ops."),
+    llvm::cl::init(false));
+
 static void addTileAndDistributePasses(OpPassManager &pm) {
   pm.addPass(createTileAndDistributeToWorkgroupsPass());
   auto &nestedModulePM = pm.nest<ModuleOp>();
@@ -326,6 +332,7 @@ void addCPUBufferOpsTileAndVectorizePipeline(
   nestedModulePM.addNestedPass<func::FuncOp>(createLLVMCPUPeelPass());
   {
     GenericVectorizationPassOptions options;
+    options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizeGatherAccesses = true;
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -399,12 +406,15 @@ void addMultiTilingExpertPassPipeline(OpPassManager &passManager,
 
   {
     nestedModulePM.addNestedPass<func::FuncOp>(createVectorizePadPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createDecomposePackUnPackOpsPass());
+    if (clDecomposePackUnpack) {
+      nestedModulePM.addNestedPass<func::FuncOp>(
+          createDecomposePackUnPackOpsPass());
+    }
     nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
     nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
 
     GenericVectorizationPassOptions options;
+    options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
@@ -469,6 +479,7 @@ void addConvTileAndDecomposeExpertPassPipeline(
   {
     nestedModulePM.addNestedPass<func::FuncOp>(createVectorizePadPass());
     GenericVectorizationPassOptions options;
+    options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
@@ -578,11 +589,14 @@ void addCPUDataTilingPipeline(OpPassManager &passManager,
   OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
   nestedModulePM.addNestedPass<func::FuncOp>(
       createLLVMCPUTilePass(tilingConfig.getVectorCommonParallelLevel()));
-  nestedModulePM.addNestedPass<func::FuncOp>(
-      createDecomposePackUnPackOpsPass());
+  if (clDecomposePackUnpack) {
+    nestedModulePM.addNestedPass<func::FuncOp>(
+        createDecomposePackUnPackOpsPass());
+  }
 
   {
     GenericVectorizationPassOptions options;
+    options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.vectorizePadding = true;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -616,6 +630,7 @@ void addCPULinalgExtTileAndVectorizePipeline(
 
   {
     GenericVectorizationPassOptions options;
+    options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
