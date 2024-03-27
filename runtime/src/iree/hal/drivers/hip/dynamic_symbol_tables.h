@@ -54,6 +54,9 @@ IREE_HAL_HIP_REQUIRED_PFN_DECL(hipGraphExecDestroy, hipGraphExec_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipGraphInstantiate, hipGraphExec_t *,
                                hipGraph_t, hipGraphNode_t *, char *, size_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipGraphLaunch, hipGraphExec_t, hipStream_t)
+IREE_HAL_HIP_REQUIRED_PFN_DECL(hipGraphAddEventRecordNode, hipGraphNode_t *,
+                               hipGraph_t, const hipGraphNode_t *, size_t,
+                               hipEvent_t)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipHostFree, void *)
 IREE_HAL_HIP_REQUIRED_PFN_DECL(hipHostGetDevicePointer, void **, void *,
                                unsigned int)

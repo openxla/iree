@@ -26,9 +26,9 @@ extern "C" {
 // each stream gets an ID allocated once and passed to all tracing macros.
 //
 // Usage:
-//   IREE_HIP_TRACE_ZONE_BEGIN(queue->tracing_context, stream);
+//   IREE_HIP_STREAM_TRACE_ZONE_BEGIN(queue->tracing_context, stream);
 //   hipModuleLaunchKernel(..., stream);
-//   IREE_HIP_TRACE_ZONE_END(queue->tracing_context, stream);
+//   IREE_HIP_STREAM_TRACE_ZONE_END(queue->tracing_context, stream);
 //   ...
 //   iree_hal_hip_tracing_context_collect(queue->tracing_context);
 //
@@ -37,8 +37,7 @@ extern "C" {
 //
 // TODO(benvanik): expose hipEvent_t reservation separate from recording. For
 // graphs we will need to insert the events but in order to reuse the graphs
-// we'll need to reserve and patch new events each graph launch. For now we
-// don't instrument graphs.
+// we'll need to reserve and patch new events each graph launch.
 //
 // Thread-compatible: external synchronization is required if using from
 // multiple threads (same as with hipStream_t itself).
@@ -77,12 +76,22 @@ void iree_hal_hip_tracing_zone_begin_external_impl(
     const char* file_name, size_t file_name_length, uint32_t line,
     const char* function_name, size_t function_name_length, const char* name,
     size_t name_length);
+void iree_hal_hip_graph_tracing_zone_begin_external_impl(
+    iree_hal_hip_tracing_context_t* context, hipGraphNode_t* out_node,
+    hipGraph_t graph, hipGraphNode_t* dependency_nodes,
+    size_t dependency_nodes_count, const char* file_name,
+    size_t file_name_length, uint32_t line, const char* function_name,
+    size_t function_name_length, const char* name, size_t name_length);
 
 void iree_hal_hip_tracing_zone_end_impl(iree_hal_hip_tracing_context_t* context,
                                         hipStream_t stream);
+void iree_hal_hip_graph_tracing_zone_end_impl(
+    iree_hal_hip_tracing_context_t* context, hipGraphNode_t* out_node,
+    hipGraph_t graph, hipGraphNode_t* dependency_nodes,
+    size_t dependency_nodes_count);
 
 // Begins a new zone with the parent function name.
-#define IREE_HIP_TRACE_ZONE_BEGIN(context, stream)                        \
+#define IREE_HIP_STREAM_TRACE_ZONE_BEGIN(context, stream)                 \
   static const iree_tracing_location_t TracyConcat(                       \
       __tracy_source_location, __LINE__) = {NULL, __FUNCTION__, __FILE__, \
                                             (uint32_t)__LINE__, 0};       \
@@ -92,24 +101,39 @@ void iree_hal_hip_tracing_zone_end_impl(iree_hal_hip_tracing_context_t* context,
 // Begins an externally defined zone with a dynamic source location.
 // The |file_name|, |function_name|, and optional |name| strings will be copied
 // into the trace buffer and do not need to persist.
-#define IREE_HIP_TRACE_ZONE_BEGIN_EXTERNAL(                              \
+#define IREE_HIP_STREAM_TRACE_ZONE_BEGIN_EXTERNAL(                       \
     context, stream, file_name, file_name_length, line, function_name,   \
     function_name_length, name, name_length)                             \
   iree_hal_hip_tracing_zone_begin_external_impl(                         \
       context, stream, file_name, file_name_length, line, function_name, \
       function_name_length, name, name_length)
+#define IREE_HIP_GRAPH_TRACE_ZONE_BEGIN_EXTERNAL(                             \
+    context, out_node, graph, dpendency_nodes, dpendency_nodes_count,         \
+    file_name, file_name_length, line, function_name, function_name_length,   \
+    name, name_length)                                                        \
+  iree_hal_hip_graph_tracing_zone_begin_external_impl(                        \
+      context, out_node, graph, dpendency_nodes, dpendency_nodes_count,       \
+      file_name, file_name_length, line, function_name, function_name_length, \
+      name, name_length)
 
-// Ends the current zone. Must be passed the |zone_id| from the _BEGIN.
-#define IREE_HIP_TRACE_ZONE_END(context, stream) \
+#define IREE_HIP_STREAM_TRACE_ZONE_END(context, stream) \
   iree_hal_hip_tracing_zone_end_impl(context, stream)
+#define IREE_HIP_GRAPH_TRACE_ZONE_END(                                  \
+    context, out_node, graph, dependency_nodes, dependency_nodes_count) \
+  iree_hal_hip_graph_tracing_zone_end_impl(                             \
+      context, out_node, graph, dependency_nodes, dependency_nodes_count)
 
 #else
 
-#define IREE_HIP_TRACE_ZONE_BEGIN(context, stream)
-#define IREE_HIP_TRACE_ZONE_BEGIN_EXTERNAL(                            \
+#define IREE_HIP_STREAM_TRACE_ZONE_BEGIN(context, stream)
+#define IREE_HIP_STREAM_TRACE_ZONE_BEGIN_EXTERNAL(                     \
     context, stream, file_name, file_name_length, line, function_name, \
     function_name_length, name, name_length)
-#define IREE_HIP_TRACE_ZONE_END(context, stream)
+#define IREE_HIP_GRAPH_TRACE_ZONE_BEGIN_EXTERNAL(                           \
+    context, out_node, graph, dpendency_nodes, dpendency_nodes_count,       \
+    file_name, file_name_length, line, function_name, function_name_length, \
+    name, name_length)
+#define IREE_HIP_STREAM_TRACE_ZONE_END(context, stream)
 
 #endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
 
