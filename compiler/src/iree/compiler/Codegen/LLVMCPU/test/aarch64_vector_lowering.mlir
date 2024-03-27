@@ -1,4 +1,5 @@
 // RUN: iree-opt %s --pass-pipeline="builtin.module(func.func(iree-llvmcpu-mmt4d-vector-lowering),iree-codegen-llvmcpu-vector-lowering-pipeline)" --split-input-file | FileCheck %s
+// RUN: iree-opt %s --pass-pipeline="builtin.module(func.func(iree-llvmcpu-mmt4d-vector-lowering),iree-codegen-llvmcpu-vector-lowering-pipeline)" --split-input-file | FileCheck %s -check-prefix=CHECK-KERNEL
 
 #map0 = affine_map<()[s0] -> (s0 * 64)>
 #map1 = affine_map<(d0, d1, d2) -> (d0, d2)>
@@ -171,3 +172,43 @@ module {
 // CHECK-LABEL: func.func @matmul_gather() {
 //    CHECK-32:   vector.fma
 //       CHECK:   linalg.generic
+
+// -----
+
+// CHECK-KERNEL-LABEL: @simpul_mul_mixed_mini_dispatch_3_mmt4d_1x1x8x8x8x1_i8xi8xi32()
+// CHECK-KERNEL-NOT: llvm.inline_asm asm_dialect
+
+func.func @simpul_mul_mixed_mini_dispatch_3_mmt4d_1x1x8x8x8x1_i8xi8xi32() {
+  %c0_i32 = arith.constant 0 : i32
+  %c0_i8 = arith.constant 0 : i8
+  %c8 = arith.constant 8 : index
+  %c1 = arith.constant 1 : index
+  %c0 = arith.constant 0 : index
+  %c64 = arith.constant 64 : index
+  %c128 = arith.constant 128 : index
+  %0 = hal.interface.binding.subspan set(0) binding(0) type(storage_buffer) alignment(64) offset(%c0) flags(ReadOnly) : memref<1x8x8x1xi8, #hal.descriptor_type<storage_buffer>>
+  memref.assume_alignment %0, 64 : memref<1x8x8x1xi8, #hal.descriptor_type<storage_buffer>>
+  %1 = hal.interface.binding.subspan set(0) binding(0) type(storage_buffer) alignment(64) offset(%c64) flags(ReadOnly) : memref<1x8x8x1xi8, strided<[64, 8, 1, 1], offset: 64>, #hal.descriptor_type<storage_buffer>>
+  memref.assume_alignment %1, 64 : memref<1x8x8x1xi8, strided<[64, 8, 1, 1], offset: 64>, #hal.descriptor_type<storage_buffer>>
+  %2 = hal.interface.binding.subspan set(0) binding(1) type(storage_buffer) alignment(64) offset(%c128) : memref<1x1x8x8xi32, strided<[64, 64, 8, 1], offset: 32>, #hal.descriptor_type<storage_buffer>>
+  memref.assume_alignment %2, 64 : memref<1x1x8x8xi32, strided<[64, 64, 8, 1], offset: 32>, #hal.descriptor_type<storage_buffer>>
+  %workgroup_id_x = hal.interface.workgroup.id[0] : index
+  %workgroup_count_x = hal.interface.workgroup.count[0] : index
+  %workgroup_id_y = hal.interface.workgroup.id[1] : index
+  %workgroup_count_y = hal.interface.workgroup.count[1] : index
+  scf.for %arg0 = %workgroup_id_y to %c1 step %workgroup_count_y {
+    scf.for %arg1 = %workgroup_id_x to %c1 step %workgroup_count_x {
+      %3 = vector.transfer_read %2[%c0, %c0, %c0, %c0], %c0_i32 {in_bounds = [true, true, true, true]} : memref<1x1x8x8xi32, strided<[64, 64, 8, 1], offset: 32>, #hal.descriptor_type<storage_buffer>>, vector<1x1x8x8xi32>
+      %4 = scf.for %arg2 = %c0 to %c8 step %c1 iter_args(%arg3 = %3) -> (vector<1x1x8x8xi32>) {
+        %5 = vector.transfer_read %0[%c0, %arg2, %c0, %c0], %c0_i8 {in_bounds = [true, true, true, true]} : memref<1x8x8x1xi8, #hal.descriptor_type<storage_buffer>>, vector<1x1x8x1xi8>
+        %6 = vector.transfer_read %1[%c0, %arg2, %c0, %c0], %c0_i8 {in_bounds = [true, true, true, true]} : memref<1x8x8x1xi8, strided<[64, 8, 1, 1], offset: 64>, #hal.descriptor_type<storage_buffer>>, vector<1x1x8x1xi8>
+        %7 = arith.extsi %5 : vector<1x1x8x1xi8> to vector<1x1x8x1xi32>
+        %8 = arith.extsi %6 : vector<1x1x8x1xi8> to vector<1x1x8x1xi32>
+        %9 = vector.contract {indexing_maps = [affine_map<(d0, d1, d2, d3, d4, d5) -> (d0, d2, d3, d5)>, affine_map<(d0, d1, d2, d3, d4, d5) -> (d1, d2, d4, d5)>, affine_map<(d0, d1, d2, d3, d4, d5) -> (d0, d1, d3, d4)>], iterator_types = ["parallel", "parallel", "reduction", "parallel", "parallel", "reduction"], kind = #vector.kind<add>} %7, %8, %arg3 : vector<1x1x8x1xi32>, vector<1x1x8x1xi32> into vector<1x1x8x8xi32>
+        scf.yield %9 : vector<1x1x8x8xi32>
+      }
+      vector.transfer_write %4, %2[%c0, %c0, %c0, %c0] {in_bounds = [true, true, true, true]} : vector<1x1x8x8xi32>, memref<1x1x8x8xi32, strided<[64, 64, 8, 1], offset: 32>, #hal.descriptor_type<storage_buffer>>
+    }
+  }
+  return
+}
