@@ -350,6 +350,11 @@ cmake -G Ninja -B ../iree-build/ \
 
 # Build
 cmake --build ../iree-build/
+
+# Install
+cd ../iree-build/
+(cd compiler && pip install -e .)
+(cd runtime && pip install -e .)
 ```
 
 ### Using the Python bindings
