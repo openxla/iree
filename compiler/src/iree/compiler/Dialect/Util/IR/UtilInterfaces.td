@@ -1502,6 +1502,13 @@ def Util_SerializableAttrInterface :
       }]
     >,
   ];
+
+  let extraClassDeclaration = [{
+    // Serializes |count| copies of |elementAttr| to |os|.
+    static LogicalResult serializeSplatValue(
+        Location loc, Attribute elementAttr, int64_t count,
+        llvm::endianness endian, llvm::raw_ostream &os);
+  }];
 }
 
 #endif  // IREE_DIALECT_UTIL_IR_UTIL_INTERFACES

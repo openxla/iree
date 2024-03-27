@@ -54,6 +54,19 @@ void buildGlobalOptExprHoistingPassPipeline(
 
 void buildGlobalOptimizationPassPipeline(
     OpPassManager &mainPassManager, const TransformOptions &transformOptions) {
+  // Import parameters before any global optimization passes so that the inlined
+  // parameters are available for folding.
+  if (!transformOptions.options.parameterImportPaths.empty()) {
+    IREE::IO::Parameters::ImportParametersPassOptions importParametersOptions;
+    importParametersOptions.scopePaths =
+        transformOptions.options.parameterImportPaths;
+    importParametersOptions.keys = transformOptions.options.parameterImportKeys;
+    importParametersOptions.maximumSize =
+        transformOptions.options.parameterImportMaximumSize;
+    mainPassManager.addPass(IREE::IO::Parameters::createImportParametersPass(
+        importParametersOptions));
+  }
+
   // ML frontends have very uneven support for user-controlled types _and_ users
   // tend to use types not well suited for the work they are doing. These
   // demotions/promotions allow users to change the types after lowering out of
@@ -176,35 +189,6 @@ void buildGlobalOptimizationPassPipeline(
     transformOptions.buildConstEvalPassPipeline(pipeline);
   }
 
-  // Export after const-eval. If the user wants to keep the input constants
-  // as is in the final parameter archive, they will probably want to disable
-  // const-eval, or could run this pass as preprocessing. There might be a
-  // configuration in the future where users want to limit const-eval to smaller
-  // constants that aren't exported and skip it for larger parameters, but this
-  // is a sensible place for the common case of wanting const-eval in the final
-  // artifact + archive.
-  if (!transformOptions.options.parameterArchiveExportPath.empty()) {
-    IREE::IO::Parameters::ExportParametersPassOptions exportParametersOptions;
-    exportParametersOptions.archivePath =
-        transformOptions.options.parameterArchiveExportPath;
-    exportParametersOptions.parameterScope =
-        transformOptions.options.parameterExportScope;
-    exportParametersOptions.minimumSize =
-        transformOptions.options.minimumParameterExportSize;
-    pipeline.addPass(IREE::IO::Parameters::createExportParametersPass(
-        exportParametersOptions));
-  }
-
-  if (!transformOptions.options.splatParameterArchiveExportPath.empty()) {
-    IREE::IO::Parameters::GenerateSplatParameterArchivePassOptions
-        generateSplatOptions;
-    generateSplatOptions.archivePath =
-        transformOptions.options.splatParameterArchiveExportPath;
-    pipeline.addPass(
-        IREE::IO::Parameters::createGenerateSplatParameterArchivePass(
-            generateSplatOptions));
-  }
-
   if (transformOptions.options.numericPrecisionReduction) {
     pipeline.addPass(createInferNumericNarrowingPass());
     pipeline.addPass(createOptimizeNumericsPass());
@@ -227,6 +211,32 @@ void buildGlobalOptimizationPassPipeline(
       // may use the assertions to derive information during analysis.
       .addPredicatedPass(transformOptions.options.stripAssertions,
                          IREE::Util::createStripDebugOpsPass);
+
+  // Export after const-eval. If the user wants to keep the input constants
+  // as is in the final parameter archive, they will probably want to disable
+  // const-eval, or could run this pass as preprocessing. There might be a
+  // configuration in the future where users want to limit const-eval to smaller
+  // constants that aren't exported and skip it for larger parameters, but this
+  // is a sensible place for the common case of wanting const-eval in the final
+  // artifact + archive.
+  if (!transformOptions.options.parameterExportPath.empty()) {
+    IREE::IO::Parameters::ExportParametersPassOptions exportParametersOptions;
+    exportParametersOptions.scopePath =
+        transformOptions.options.parameterExportPath;
+    exportParametersOptions.minimumSize =
+        transformOptions.options.parameterExportMinimumSize;
+    mainPassManager.addPass(IREE::IO::Parameters::createExportParametersPass(
+        exportParametersOptions));
+  }
+  if (!transformOptions.options.parameterSplatExportFile.empty()) {
+    IREE::IO::Parameters::GenerateSplatParameterArchivePassOptions
+        generateSplatOptions;
+    generateSplatOptions.filePath =
+        transformOptions.options.parameterSplatExportFile;
+    mainPassManager.addPass(
+        IREE::IO::Parameters::createGenerateSplatParameterArchivePass(
+            generateSplatOptions));
+  }
 }
 
 namespace {

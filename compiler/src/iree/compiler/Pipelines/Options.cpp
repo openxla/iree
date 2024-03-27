@@ -70,6 +70,24 @@ InputDialectOptions::Type InputDialectOptions::parseInputTypeMnemonic() {
   }
 }
 
+void PreprocessingOptions::bindOptions(OptionsBinder &binder) {
+  static llvm::cl::OptionCategory category(
+      "IREE options for apply custom preprocessing before normal IREE "
+      "compilation flow");
+
+  binder.opt<std::string>(
+      "iree-preprocessing-pass-pipeline", preprocessingPassPipeline,
+      llvm::cl::desc("Textual description of the pass pipeline to run before "
+                     "running normal IREE compilation pipelines"),
+      llvm::cl::cat(category));
+  binder.opt<std::string>(
+      "iree-preprocessing-transform-spec-filename",
+      preprocessingTransformSpecFilename,
+      llvm::cl::desc(
+          "File name of a transform dialect spec to use for preprocessing"),
+      llvm::cl::cat(category));
+}
+
 void GlobalOptimizationOptions::bindOptions(OptionsBinder &binder) {
   static llvm::cl::OptionCategory category(
       "IREE options for controlling global optimizations.");
@@ -133,26 +151,35 @@ void GlobalOptimizationOptions::bindOptions(OptionsBinder &binder) {
                    llvm::cl::desc("Strips debug assertions after any useful "
                                   "information has been extracted."),
                    llvm::cl::cat(category));
-  binder.opt<std::string>(
-      "iree-opt-parameter-archive-export-file", parameterArchiveExportPath,
-      llvm::cl::desc(
-          "File path to create a parameter archive using any inline global "
-          "constants."),
+
+  binder.list<std::string>(
+      "iree-opt-import-parameters", parameterImportPaths,
+      llvm::cl::desc("File paths to archives to import parameters from with an "
+                     "optional `scope=` prefix."),
       llvm::cl::cat(category));
+  binder.list<std::string>("iree-opt-import-parameter-keys",
+                           parameterImportKeys,
+                           llvm::cl::desc("List of parameter keys to import."),
+                           llvm::cl::cat(category));
+  binder.opt<int64_t>("iree-opt-import-parameter-maximum-size",
+                      parameterImportMaximumSize,
+                      llvm::cl::desc("Maximum size of parameters to import."),
+                      llvm::cl::cat(category));
+
   binder.opt<std::string>(
-      "iree-opt-parameter-archive-export-scope", parameterExportScope,
-      llvm::cl::desc("Scope for parameters in the archive created in "
-                     "`iree-opt-export-parameter-archive-export-file`."),
+      "iree-opt-export-parameters", parameterExportPath,
+      llvm::cl::desc("File path to an archive to export parameters to with an "
+                     "optional `scope=` prefix."),
       llvm::cl::cat(category));
   binder.opt<int64_t>(
-      "iree-opt-minimum-parameter-export-size", minimumParameterExportSize,
+      "iree-opt-export-parameter-minimum-size", parameterExportMinimumSize,
       llvm::cl::desc(
           "Minimum size of constants to export to the archive created in "
           "`iree-opt-export-parameter-archive-export-file`."),
       llvm::cl::cat(category));
+
   binder.opt<std::string>(
-      "iree-opt-splat-parameter-archive-export-file",
-      splatParameterArchiveExportPath,
+      "iree-opt-splat-parameters", parameterSplatExportFile,
       llvm::cl::desc(
           "File path to create a parameter archive of splat values out of all "
           "parameter backed globals."),
@@ -207,24 +234,6 @@ void SchedulingOptions::bindOptions(OptionsBinder &binder) {
       "iree-scheduling-optimize-bindings", optimizeBindings,
       llvm::cl::desc(
           "Enables binding fusion and dispatch site specialization."),
-      llvm::cl::cat(category));
-}
-
-void PreprocessingOptions::bindOptions(OptionsBinder &binder) {
-  static llvm::cl::OptionCategory category(
-      "IREE options for apply custom preprocessing before normal IREE "
-      "compilation flow");
-
-  binder.opt<std::string>(
-      "iree-preprocessing-pass-pipeline", preprocessingPassPipeline,
-      llvm::cl::desc("Textual description of the pass pipeline to run before "
-                     "running normal IREE compilation pipelines"),
-      llvm::cl::cat(category));
-  binder.opt<std::string>(
-      "iree-preprocessing-transform-spec-filename",
-      preprocessingTransformSpecFilename,
-      llvm::cl::desc(
-          "File name of a transform dialect spec to use for preprocessing"),
       llvm::cl::cat(category));
 }
 
