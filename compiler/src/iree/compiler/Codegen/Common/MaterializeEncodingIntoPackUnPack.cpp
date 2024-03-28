@@ -19,9 +19,11 @@
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 #include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/IndexingUtils.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Location.h"
 #include "mlir/Support/LLVM.h"
@@ -170,6 +172,19 @@ Value getMmt4dOperand(Value value, linalg::LinalgOp linalgOp,
   return expandedValue;
 }
 
+static Operation *createTranspose(OpBuilder &builder, Value source,
+                                  SmallVector<int64_t> perm) {
+  SmallVector<OpFoldResult> mixedSizes =
+      tensor::getMixedSizes(builder, source.getLoc(), source);
+  applyPermutationToVector(mixedSizes, perm);
+  Type elemType = cast<RankedTensorType>(source.getType()).getElementType();
+  Value empty =
+      builder.create<tensor::EmptyOp>(source.getLoc(), mixedSizes, elemType)
+          .getResult();
+  return builder.create<linalg::TransposeOp>(source.getLoc(), source, empty,
+                                             perm);
+}
+
 //===---------------------------------------------------------------------===//
 // Methods to convert `set_encoding` and `unset_encoding` operations
 // to `pack` and `unpack` operations respectively.
@@ -240,7 +255,34 @@ static FailureOr<tensor::UnPackOp> lowerUnsetEncodingToUnpackOp(
     RewriterBase &rewriter, UnsetEncodingOp encodingOp, Value packedValue,
     MaterializeEncodingFn materializeEncodingFn,
     MaterializeEncodingValueFn materializeEncodingValueFn) {
+  llvm::dbgs() << "lowerUnsetEncodingToUnpackOp sees:\n\nencodingOp:\n\n"
+               << encodingOp << "\n\npackedValue:\n\n"
+               << packedValue << "\n\n";
   RankedTensorType sourceType = encodingOp.getSourceType();
+
+  auto encoding = getEncodingAttr(sourceType);
+  if (encoding) {
+    IntegerAttr narrowM = encoding.getMatmulNarrow_M();
+    IntegerAttr narrowN = encoding.getMatmulNarrow_N();
+    bool transpose =
+        narrowN && (!narrowM || narrowM.getInt() > narrowN.getInt());
+    if (transpose) {
+      SmallVector<int64_t> permutation;
+      if (packedValue.getType().cast<RankedTensorType>().getRank() == 4) {
+        // linalg.matmul case
+        permutation = {1, 0, 3, 2};
+      } else if (packedValue.getType().cast<RankedTensorType>().getRank() ==
+                 5) {
+        // linalg.batch_matmul case. Leave dimension 0 alone, it's the batch.
+        permutation = {0, 2, 1, 4, 3};
+      } else {
+        assert(false && "rank should be 4 or 5 here");
+      }
+      packedValue =
+          createTranspose(rewriter, packedValue, permutation)->getResult(0);
+    }
+  }
+
   FailureOr<MaterializeEncodingInfo> materializeEncodingInfo =
       materializeEncodingFn(sourceType);
   if (failed(materializeEncodingInfo)) {
@@ -350,6 +392,13 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
 
     Type newResultType = newResult.getType();
 
+    IntegerAttr narrowM = resultEncoding.getMatmulNarrow_M();
+    IntegerAttr narrowN = resultEncoding.getMatmulNarrow_N();
+    bool transpose =
+        narrowN && (!narrowM || narrowM.getInt() > narrowN.getInt());
+    if (transpose) {
+      std::swap(newLhs, newRhs);
+    }
     auto cDims = getEncodingContractionDims(lhsEncoding);
     if (cDims->batch.empty()) {
       result = rewriter.create<linalg::Mmt4DOp>(
@@ -365,6 +414,8 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
           linalgOp->getLoc(), operands[2].getType(), result->getResult(0), ri);
     }
   }
+  llvm::dbgs() << "lowerContractionOpWithEncoding result: " << *result
+               << "\n\n";
   return result;
 }
 
