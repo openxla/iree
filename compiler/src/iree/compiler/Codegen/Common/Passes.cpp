@@ -18,6 +18,9 @@ void addCommonTargetExecutablePreprocessingPasses(
   nestedModulePM.addPass(createBufferizeCopyOnlyDispatchesPass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       createDecomposeSoftmaxPass(useDecomposeSoftmaxFusion));
+  // Lubo
+  // Lubo nestedModulePM.addNestedPass<func::FuncOp>(createGenericVectorizationPass());
+  // Lubo end
   passManager.addPass(createMaterializeUserConfigsPass());
 }
 

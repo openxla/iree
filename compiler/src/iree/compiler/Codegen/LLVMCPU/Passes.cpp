@@ -28,6 +28,8 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
 
+#include <iostream>
+
 #define DEBUG_TYPE "iree-llvm-cpu-lowering-pass-pipeline"
 
 namespace mlir::iree_compiler {
@@ -108,6 +110,13 @@ static void addTileAndDistributePasses(OpPassManager &pm) {
       createConcretizePadResultShapePass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       IREE::LinalgExt::createTileAndDecomposeWinogradTransformPass());
+  // Lubo
+  // GenericVectorizationPassOptions options;
+  //   options.enableVectorMasking = true;
+  //   nestedModulePM.addNestedPass<func::FuncOp>(
+  //     createGenericVectorizationPass(options));
+
+  // Lubo end
 }
 
 //===---------------------------------------------------------------------===//
@@ -322,6 +331,8 @@ void buildLLVMCPUVectorLoweringPipeline(
 void addCPUBufferOpsTileAndVectorizePipeline(
     OpPassManager &passManager, TilingConfig &tilingConfig,
     LLVMCPUPipelineOptions &pipelineOpt) {
+  std::cerr << "\nLubo11\n";
+
   addTileAndDistributePasses(passManager);
 
   // Skip tiling reduction loops because this is expected to apply on copy ops
@@ -665,6 +676,13 @@ void addCPUDefaultPassPipeline(OpPassManager &passManager) {
   addTileAndDistributePasses(passManager);
   OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
   addCPUBufferizePasses(nestedModulePM);
+  // // Lubo
+  // // Generic vector lowering.
+  // LLVMCPUVectorLoweringPassOptions options;
+  // // options.lowerVectorTransposeToAVX2 = lowerToAVX2;
+  // // options.splitVectorTransfersTo = "linalg-copy";
+  // buildLLVMCPUVectorLoweringPipeline(nestedModulePM, options);
+  // // Lubo end
 }
 
 void addTransformDialectPasses(OpPassManager &passManager,

@@ -7,6 +7,7 @@
 #include "iree/compiler/Codegen/Common/PassDetail.h"
 #include "iree/compiler/Codegen/Common/Passes.h"
 #include "iree/compiler/Codegen/Common/TileSizeSelection.h"
+#include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
 #include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
@@ -19,8 +20,11 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+#include <iostream> // Lubo
+
 #define DEBUG_TYPE "iree-codegen-generic-vectorization"
 #define VEC_DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
+#define VEC_LDBG(X) LLVM_DEBUG(VEC_DBGS() << X << "\n")
 
 namespace mlir::iree_compiler {
 
@@ -310,13 +314,996 @@ public:
   }
   void runOnOperation() override;
 };
+// Lubo: Todo: Deal in sort order with element already inserted. (We look for slt... HOw about equal???) // Lubo end
+
+/// Returns success if `inputVectorSizes` is a valid masking configuraion for
+/// given `shape`, i.e., it meets:
+///   1. The numbers of elements in both array are equal.
+///   2. `inputVectorSizes` does nos have dynamic dimensions.
+///   3. All the values in `inputVectorSizes` are greater than or equal to
+///      static sizes in `shape`.
+static LogicalResult
+isValidMaskedInputVector(ArrayRef<int64_t> shape,
+                         ArrayRef<int64_t> inputVectorSizes) {
+  VEC_LDBG("Iteration space static sizes:");
+  LLVM_DEBUG(llvm::interleaveComma(shape, llvm::dbgs()));
+  LLVM_DEBUG(llvm::dbgs() << "\n");
+
+  if (inputVectorSizes.size() != shape.size()) {
+    VEC_LDBG("Input vector sizes don't match the number of loops");
+    return failure();
+  }
+  if (ShapedType::isDynamicShape(inputVectorSizes)) {
+    VEC_LDBG("Input vector sizes can't have dynamic dimensions");
+    return failure();
+  }
+  if (!llvm::all_of(llvm::zip(shape, inputVectorSizes),
+                    [](std::tuple<int64_t, int64_t> sizePair) {
+                      int64_t staticSize = std::get<0>(sizePair);
+                      int64_t inputSize = std::get<1>(sizePair);
+                      return ShapedType::isDynamic(staticSize) ||
+                             staticSize <= inputSize;
+                    })) {
+    VEC_LDBG("Input vector sizes must be greater than or equal to iteration space "
+         "static sizes");
+    return failure();
+  }
+  return success();
+}
+
+static LogicalResult
+vectorizeTopkOpPrecondition(IREE::LinalgExt::TopkOp topkOp,
+                            ArrayRef<int64_t> inputVectorSizes) {
+
+  auto out0 = topkOp.getResults()[0];
+  auto resShapedTy = llvm::cast<ShapedType>(out0.getType());
+  ArrayRef<int64_t> resShape = resShapedTy.getShape();
+  if (resShapedTy.isDynamicShape(resShape))
+      return failure();
+
+  auto inShapedTy = topkOp.getInputType();
+  ArrayRef<int64_t> inShape = inShapedTy.getShape();
+
+  // Validate input
+  auto inElemTy = topkOp.getInputType().getElementType();
+  if (auto intType = llvm::dyn_cast_if_present<IntegerType>(inElemTy)) {
+    // Do nothing. Expected type.
+  }
+  else if (auto floatType = llvm::dyn_cast_if_present<FloatType>(inElemTy)) {
+    // Do nothing. Expected type.
+  }
+  else {
+    // Unexpected type.
+    return failure();
+  }
+
+  if (failed(isValidMaskedInputVector(
+          inShape.take_front(topkOp.getInputRank()),
+          inputVectorSizes)))
+    return failure();
+  return success();
+  // Lubo return failure();
+}
+
+static scf::ForOp replaceForOpWithNewSignature(RewriterBase &rewriter,
+                                               scf::ForOp loop,
+                                               ValueRange newInitArgs) {
+  OpBuilder::InsertionGuard g(rewriter);
+  // llvm::errs() << "\nLubo41: " << "\n";
+  // loop.print(llvm::errs());
+  // llvm::errs() << "\nLubo41: " << "end\n";
+  // llvm::errs() << "\nLubo44: " << "\n";
+  // llvm::errs() << loop.getInitArgs().size();
+  // llvm::errs() << "\nLubo44: " << "end\n";
+  // Create a new loop before the existing one, with the extra operands.
+  rewriter.setInsertionPoint(loop);
+  auto operands = llvm::to_vector<4>(loop.getInitArgs());
+  llvm::append_range(operands, newInitArgs);
+  scf::ForOp newLoop = rewriter.create<scf::ForOp>(
+      loop.getLoc(), loop.getLowerBound(), loop.getUpperBound(), loop.getStep(),
+      operands);
+  rewriter.eraseBlock(newLoop.getBody());
+
+  newLoop.getRegion().getBlocks().splice(
+      newLoop.getRegion().getBlocks().begin(), loop.getRegion().getBlocks());
+
+  newLoop.getBody()->getTerminator()->print(llvm::errs());
+  
+  // newLoop.getRegion().print(llvm::errs());
+  for (Value operand : newInitArgs) {
+    newLoop.getBody()->addArgument(operand.getType(), operand.getLoc());
+  }
+
+  for (auto it : llvm::zip(loop.getResults(), newLoop.getResults().take_front(
+                                                  loop.getNumResults())))
+    rewriter.replaceAllUsesWith(std::get<0>(it), std::get<1>(it));
+
+  LLVM_DEBUG(VEC_DBGS() << "newLoop now: " << newLoop << "\n");
+  LLVM_DEBUG(VEC_DBGS() << "stripped scf.for: " << loop << "\n");
+  LLVM_DEBUG(VEC_DBGS() << "erase: " << loop);
+
+  rewriter.eraseOp(loop);
+  return newLoop;
+}
+
+/// Add the necessary IterArgs to the input iterating loop.
+static LogicalResult addIterArgs(RewriterBase &rewriter, Location loc,
+                                 scf::ForOp loop, Type outValType, Type outIdxType) {
+  llvm::DenseMap<Value, Value> valueMapping;
+  SmallVector<Value> newOperands;
+  SmallVector<std::pair<size_t, size_t>> argMapping;
+  // First, copy the existing loop args.
+  for (const auto &operand : llvm::enumerate(loop.getInitArgs())) {
+    auto it = valueMapping.find(operand.value());
+    if (it == valueMapping.end()) {
+      LLVM_DEBUG(VEC_DBGS() << "no value mapping for: " << operand.value() << "\n");
+        // llvm::errs() << "\nLubo46: " << "\n";
+        // operand.value().print(llvm::errs());
+        // llvm::errs() << "\nLubo46: " << "end\n";
+
+      continue;
+    }
+        // llvm::errs() << "\nLubo47: " << "\n";
+        // it->first.print(llvm::errs());
+        // llvm::errs() << "\nLubo47: " << "end\n";
+        argMapping.push_back(std::make_pair(
+        operand.index(), loop.getInitArgs().size() + newOperands.size()));
+    newOperands.push_back(it->second);
+  }
+
+  // llvm::errs() << "\nLubo45: " << "\n";
+  // llvm::errs() << newOperands.size();
+  // llvm::errs() << "\nLubo45: " << "end\n";
+    
+  // // Add an arg wheter the first element was initialized
+  Value firstElemInit = rewriter.create<arith::ConstantIntOp>(loc, 1, 1);
+  newOperands.push_back(firstElemInit);
+
+  // Add an arg for the smallest element added to the out array
+  Value smallestOut;
+  if (auto floatType = llvm::dyn_cast_if_present<FloatType>(outValType)) {
+      smallestOut = 
+        rewriter.create<arith::ConstantFloatOp>(loc,
+                                                mlir::APFloat(floatType.getFloatSemantics(),
+                                                0),
+                                                floatType);
+  }
+  else if (auto intType = llvm::dyn_cast_if_present<IntegerType>(outValType)) {
+    smallestOut = 
+        rewriter.create<arith::ConstantIntOp>(loc, 0, intType);
+  }
+  else {
+    // Unexpected type!
+    return failure();
+  }
+  newOperands.push_back(smallestOut);
+
+  // Add an arg for the number of elements added to the out array(s).
+  Value numElemsAdded = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  newOperands.push_back(numElemsAdded);
+   // Lubo 
+  // llvm::errs() << "\nLubo42: " << "\n";
+  // llvm::errs() << newOperands.size();
+  // llvm::errs() << "\nLubo42: " << "end\n";
+  // LUBO END
+  scf::ForOp newForOp = replaceForOpWithNewSignature(rewriter, loop, newOperands);
+  Block &loopBody = *newForOp.getBody();
+  for (auto mapping : argMapping) {
+    valueMapping[newForOp.getResult(mapping.first)] =
+        newForOp.getResult(mapping.second);
+    valueMapping[loopBody.getArgument(mapping.first +
+                                      newForOp.getNumInductionVars())] =
+        loopBody.getArgument(mapping.second + newForOp.getNumInductionVars());
+  }
+
+  // Lubo 
+  // llvm::errs() << "\nLubo40: " << "\n";
+  // newForOp.print(llvm::errs());
+  // llvm::errs() << "\nLubo40: " << "end\n";
+  // LUBO END
+  return success();
+}
+
+/// Create a TransferReadOp from `source` with static shape `readShape`. If the
+/// vector type for the read is not the same as the type of `source`, then a
+/// mask is created on the read.
+static Value createReadOrMaskedRead(RewriterBase &rewriter, Location loc,
+                                    Value source,
+                                    ArrayRef<int64_t> readShape,
+                                    Type elemType) {
+  assert(llvm::none_of(readShape,
+                       [](int64_t s) { return s == ShapedType::kDynamic; }));
+  Value padValue = rewriter.create<arith::ConstantOp>(
+          loc, elemType, rewriter.getZeroAttr(elemType));
+  auto sourceShape = dyn_cast<ShapedType>(source.getType()).getShape();
+  assert(sourceShape.size() == readShape.size());
+  auto maskType = VectorType::get(readShape, rewriter.getI1Type());
+  auto vectorType = VectorType::get(readShape, padValue.getType());
+  int64_t readRank = readShape.size();
+  auto zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  auto transferReadOp = rewriter.create<vector::TransferReadOp>(
+      loc,
+      /*vectorType=*/vectorType,
+      /*source=*/source,
+      /*indices=*/SmallVector<Value>(readRank, zero),
+      /*padding=*/padValue,
+      /*inBounds=*/SmallVector<bool>(readRank, true));
+  if (llvm::equal(readShape, sourceShape)) {
+    return transferReadOp;
+  }
+  SmallVector<OpFoldResult> mixedSourceDims =
+      tensor::getMixedSizes(rewriter, loc, source);
+  Value mask =
+      rewriter.create<vector::CreateMaskOp>(loc, maskType, mixedSourceDims);
+  return mlir::vector::maskOperation(rewriter, transferReadOp, mask)
+      ->getResult(0);
+}
+
+struct InsertElemContinuationValues {
+  Value out0;         // OutputValues
+  Value out1;         // OutputIndices
+  Value smallestElem; // Smallest Element
+  Value addedElems;   // The number of elements added to the output
+};
+
+/// Insert a new, bigger element than the currently smallest element added in
+/// output of the function.
+///
+/// 1. Find the position of the element that needs to be inserted.
+///    There is no support for returning in the middle of a loop,
+///    so a iter_arg flag is set to annotate that when the insertion
+///    index is found.
+/// 2. If the insertion index is equal of the dimension of output,
+///    no addition is needed.
+/// 3. If the insertion index is equal of the elements added to the output,
+///    No need to shift, just add the element at the end and expand the
+///    addedElems.
+/// Returns the out0, out1, smallestElem, addedElems values for continuation.
+InsertElemContinuationValues insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
+                        Value elemIndex, Value outputNum, InsertElemContinuationValues continuation) {
+  (void)outputNum; // Lubo : TODO: Remove
+  // llvm::errs() << "\nLubo50: " << "\n";
+  // continuation.out0.print(llvm::errs());
+  // llvm::errs() << "\nLubo50.1: " << "\n";
+  // continuation.out1.print(llvm::errs());
+  // llvm::errs() << "\nLubo50: " << "end\n";
+  // Find the index to insert
+  SmallVector<Value> newOperands;
+  // Flag wheter we have not found the first smaller element.
+  newOperands.push_back(b.create<arith::ConstantIntOp>(loc, 1, 1));
+  // Keeps the index of where to insert the element that we return.
+  newOperands.push_back(b.create<arith::ConstantIndexOp>(loc, 0));
+  
+  scf::YieldOp scfYieldOp;
+  scf::ForOp findSmaller = b.create<scf::ForOp>(loc,
+    b.create<arith::ConstantIndexOp>(loc, 0),
+    continuation.addedElems,
+    b.create<arith::ConstantIndexOp>(loc, 1),
+    newOperands,
+    [&](OpBuilder &bIn, Location nestedLoc, Value iv, ValueRange args) {
+      scfYieldOp = b.create<scf::YieldOp>(nestedLoc, newOperands);
+    });
+
+  // Fill in the body for findSmaller Loop
+  // We need the iter_args and they are not created yet in the lambda.
+  {
+    PatternRewriter::InsertionGuard guard(b);
+    b.setInsertionPoint(scfYieldOp);
+    // Flag wheter we found the insertion point.
+    Value notFoundSmaller = findSmaller.getRegionIterArgs()[0];
+    // The index where the element needs to be inserted.
+    Value insertionIndex = findSmaller.getRegionIterArgs()[1];
+    // If we have found the insertionIndex in previous iterations, do nothing.
+    Value cmpElemOp = b.create<arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, notFoundSmaller,
+                                     b.create<arith::ConstantIntOp>(loc, 1, 1));
+    auto ifFoundIndex = b.create<scf::IfOp>(
+      loc, cmpElemOp,
+      [&](OpBuilder &b, Location loc) {
+        // Not found yet.
+        Value notFoundSm = notFoundSmaller;
+        Value insertionInd = insertionIndex;
+
+        Value idxDim0 = b.create<arith::ConstantIndexOp>(loc, 0);
+        Value inElem = b.create<tensor::ExtractOp>(loc, continuation.out0, ValueRange{idxDim0, findSmaller.getInductionVar()});
+        // First, check if this is the position where the new element needs to be inserted.
+        if (auto floatType = llvm::dyn_cast_if_present<FloatType>(elemToInsertIfNeeded.getType())) {
+          cmpElemOp = b.create<arith::CmpFOp>(loc, mlir::arith::CmpFPredicate::OLT, inElem, elemToInsertIfNeeded);
+        }
+        else if (auto intType = llvm::dyn_cast_if_present<IntegerType>(elemToInsertIfNeeded.getType())) {
+          cmpElemOp = b.create<arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::slt, inElem, elemToInsertIfNeeded);
+        }
+        else {
+          assert(false && "Invalid type for topk vectorization!");
+        }
+
+        cmpElemOp = b.create<arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, cmpElemOp,
+                                        b.create<arith::ConstantIntOp>(loc, 1, 1));
+        auto ifToAdd = b.create<scf::IfOp>(
+          loc, cmpElemOp,
+          [&](OpBuilder &b, Location loc) {
+            // Get the value of the current induction variable.
+            // The inductionVariable can't be used directry, because there is // Lubo TODO: Fix comment
+            // no return in the middle of the loop, so we iterate to the end.
+            Value insertionIndex = // Lubo 1111111 findSmaller.getInductionVar();
+             b.create<arith::AddIOp>(loc, findSmaller.getInductionVar(),
+                                          b.create<arith::ConstantIndexOp>(loc, 0));
+            SmallVector<Value> newOperands;
+            // Set the flag that we have "found" the index where to insert.
+            newOperands.push_back(b.create<arith::ConstantIntOp>(loc, 0, 1));
+            newOperands.push_back(insertionIndex);
+            b.create<scf::YieldOp>(loc, newOperands);
+          },
+          [&](OpBuilder &b, Location loc) {
+            // The index was not found yet.
+            Value notFoundSmIn = notFoundSm;
+            Value insertionIndIn = insertionInd;
+            SmallVector<Value> newOperands;
+            newOperands.push_back(notFoundSmIn);
+            newOperands.push_back(insertionIndIn);
+            b.create<scf::YieldOp>(loc, newOperands);
+          });
+
+          SmallVector<Value> newOperands;
+          newOperands.push_back(ifToAdd.getResult(0));
+          // Lubo
+          newOperands.push_back(ifToAdd.getResult(1));
+          /// Value Lubo11111 = b.create<arith::ConstantIndexOp>(loc, 2); // Lubo 111111
+        /// newOperands.push_back(Lubo11111);
+          b.create<scf::YieldOp>(loc, newOperands);
+        },
+        [&](OpBuilder &b, Location loc) {
+          // The index was already found yet.
+          // Just return. No need to update anything.
+          SmallVector<Value> newOperands;
+          Value notFoundSm = notFoundSmaller;
+          Value insertionInd = insertionIndex;
+          newOperands.push_back(notFoundSm);
+          newOperands.push_back(insertionInd);
+          b.create<scf::YieldOp>(loc, newOperands);
+        });
+
+      notFoundSmaller = ifFoundIndex.getResult(0);
+      insertionIndex = ifFoundIndex.getResult(1);
+
+      SmallVector<Value> newOperands;
+      newOperands.push_back(notFoundSmaller);
+      newOperands.push_back(insertionIndex);
+      b.create<scf::YieldOp>(loc, newOperands);
+      scfYieldOp.erase();
+  }
+
+  // llvm::errs() << "\nLubo34: " << "\n";
+  // findSmaller.print(llvm::errs());
+  // llvm::errs() << "\nLubo34: " << "end\n";
+  // (void)findSmaller; // Lubo TODO:
+  Value insertionIndexNotFound = findSmaller.getResult(0);
+  Value insertionIndex = findSmaller.getResult(1);
+
+  // If the insertionIndex is not found and the addedElems == output dimension, do nothing.
+  // The element should not be added.
+  Value cmp = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, continuation.addedElems, outputNum);
+  cmp = b.create<arith::AndIOp>(loc, cmp, insertionIndexNotFound);
+  // llvm::errs() << "\nLubo51: " << "\n";
+  // outVals.print(llvm::errs());
+  // llvm::errs() << "\nLubo51.1: " << "\n";
+  // outInds.print(llvm::errs());
+  // llvm::errs() << "\nLubo51: " << "end\n";
+  auto ifAddElem = b.create<scf::IfOp>(
+    loc, cmp,
+    [&](OpBuilder &b, Location loc) {
+      // if
+      // Element doesn't need to be added to the output.
+      // It is smaller than the last element in the out dimension.
+      // Value outValsIn = outVals;
+      // Value outIndsIn = outInds;
+      Value smElem = continuation.smallestElem;
+      Value addElems = continuation.addedElems;
+      Value outValsIn = continuation.out0; // Lubo10 To use the iter_args.
+      Value outIndsIn = continuation.out1;
+      // Value smElem = newLoop.getRegionIterArgs()[2];
+      // Value addElems = newLoop.getRegionIterArgs()[3];
+  //     llvm::errs() << "\nLubo5=3: " << "\n";
+  // outValsIn.print(llvm::errs());
+  // llvm::errs() << "\nLubo53.1: " << "\n";
+  // outIndsIn.print(llvm::errs());
+  // llvm::errs() << "\nLubo53: " << "end\n";
+      SmallVector<Value> newOperands;
+      newOperands.push_back(outValsIn);
+      newOperands.push_back(outIndsIn);
+      newOperands.push_back(smElem);
+      newOperands.push_back(addElems);
+      auto LuboRemove = b.create<scf::YieldOp>(loc, newOperands);
+      llvm::errs() << "\nLubo54: " << "\n";
+      LuboRemove.print(llvm::errs());
+      // llvm::errs() << "\nLubo54.1: " << "\n";
+      // outValsIn.print(llvm::errs());
+      // llvm::errs() << "\nLubo54.2: " << "\n";
+      // outIndsIn.print(llvm::errs());
+      // llvm::errs() << "\nLubo54.3: " << "\n";
+      // smElem.print(llvm::errs());
+      // llvm::errs() << "\nLubo54.4: " << "\n";
+      // addElems.print(llvm::errs());
+      // llvm::errs() << "\nLubo54: " << "end\n";
+    },
+    [&](OpBuilder &b, Location loc) {
+      // else
+      // If the insertionIndex not found, element is added at the end.
+      // No need to shift.
+      // The condition above exclude the case where we have filled the output
+      // tensor already.
+      Value outValsIn = continuation.out0;
+      Value outIndsIn = continuation.out1;
+      Value smElemIn = continuation.smallestElem;;
+      Value addElemsIn = continuation.addedElems;
+      // Lubo (void)insertionIndex; // Lubo TODO:
+      auto ifAddAtEnd = b.create<scf::IfOp>(
+        loc, insertionIndexNotFound,
+        [&](OpBuilder &b, Location loc) {
+          // if
+          // Adding at addedElems and expanding the addedElems
+          Value outValsIf = outValsIn;
+          Value outIndsIf = outIndsIn;
+          Value smElemIf = elemToInsertIfNeeded;
+          Value addElemsIf = addElemsIn;
+          Value idx0 = b.create<arith::ConstantIndexOp>(loc, 0);
+          // llvm::errs() << "\nLubo52: " << "\n";
+          // outValsIf.print(llvm::errs());
+          // llvm::errs() << "\nLubo52.1: " << "\n";
+          // outIndsIf.print(llvm::errs());
+          // llvm::errs() << "\nLubo52: " << "end\n";
+          outValsIf = b.create<tensor::InsertOp>(loc, elemToInsertIfNeeded, outValsIf,
+                                    ValueRange{idx0, addElemsIf});
+          Value elemIndexI32 = b.create<arith::IndexCastOp>(loc, b.getI32Type(), elemIndex);
+          outIndsIf = b.create<tensor::InsertOp>(loc, elemIndexI32, outIndsIf,
+                                     ValueRange{idx0, addElemsIf});
+          auto one = b.create<arith::ConstantIndexOp>(loc, 1);
+          addElemsIf = b.create<arith::AddIOp>(loc, addElemsIf, one);
+          SmallVector<Value> newOperandsIf;
+          newOperandsIf.push_back(outValsIf);
+          newOperandsIf.push_back(outIndsIf);
+          newOperandsIf.push_back(smElemIf);
+          newOperandsIf.push_back(addElemsIf);
+          b.create<scf::YieldOp>(loc, newOperandsIf);
+        },
+        [&](OpBuilder &b, Location loc) {
+          Value outValsElse = outValsIn;
+          Value outIndsElse = outIndsIn;
+          Value smElemElse = smElemIn;
+          Value addElemsElse = addElemsIn;
+          // Get the new end-index for moving the array.
+          // It is one less the last index of an added element in the output,
+          // because the move is done using a[i+1] = a[i] shifting.
+          Value cmp = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, addElemsElse, outputNum);
+          auto ifExpand = b.create<scf::IfOp>(
+            loc, cmp,
+            [&](OpBuilder &b, Location loc) {
+              // if
+              // No expansion. Shift elements out of the output.
+              Value addElems = addElemsElse;
+              auto one = b.create<arith::ConstantIndexOp>(loc, 1);
+              Value lastElemIndex = b.create<arith::SubIOp>(loc, addElems, one);
+              SmallVector<Value> newOperands;
+              newOperands.push_back(lastElemIndex);
+              b.create<scf::YieldOp>(loc, newOperands);
+            },
+            [&](OpBuilder &b, Location loc) {
+              // else
+              // Expansion
+              Value addElems = addElemsElse;
+              SmallVector<Value> newOperands;
+              newOperands.push_back(addElems);
+              b.create<scf::YieldOp>(loc, newOperands);
+            });
+
+          Value lastElemIndex = ifExpand.getResult(0);
+          (void)lastElemIndex; // Lubo TODO:
+          // Replacing out[i+1] with out[i].
+          // Make sure not over the index.
+          auto one = b.create<arith::ConstantIndexOp>(loc, 1);
+          // Lubo Need it because the move is done using a[i+1] = a[i] shifting.
+          // Lubo: Fill in the last element... lastElemIndex = b.create<arith::SubIOp>(loc, lastElemIndex, one);
+          // The following loop assumes that the iter_args are
+          // the value of the element we are replacing in the next element,
+          // for the both out arrays as 0th and 1st RegionIterArg.
+          // Note: The elements of the a[i+1] are extracted, then the a[i+1]
+          // elements are replaced with a[i] elements, and then the 
+          // extracted a[i+1] are placed as iter_args 0 and 1.
+          Value idx0 = b.create<arith::ConstantIndexOp>(loc, 0);
+          Value out1Repl = b.create<tensor::ExtractOp>(loc, outValsElse, ValueRange{idx0, insertionIndex});
+          Value out2Repl = b.create<tensor::ExtractOp>(loc, outIndsElse, ValueRange{idx0, insertionIndex});
+          (void)out1Repl; // Lubo TODO
+          (void)out2Repl; // Lubo TODO
+          SmallVector<Value> newOperands;
+          newOperands.push_back(outValsElse);
+          newOperands.push_back(outIndsElse);
+          newOperands.push_back(out1Repl);
+          newOperands.push_back(out2Repl);
+          scf::YieldOp lastLoopOp;
+          // Now shift the elements
+          scf::ForOp shiftElemsLoop = b.create<scf::ForOp>(loc,
+            insertionIndex,
+            lastElemIndex,
+            b.create<arith::ConstantIndexOp>(loc, 1),
+            newOperands,
+            [&](OpBuilder &bIn, Location nestedLoc, Value iv, ValueRange args) {
+              lastLoopOp = bIn.create<scf::YieldOp>(nestedLoc, newOperands);
+            });
+
+          // Create the loop body.
+          // Need access to RegionIterArgs, which are not constructed in the lambda yet.
+          {
+            PatternRewriter::InsertionGuard guard(b);
+            // auto ip = rewriter.saveInsertionPoint();
+            b.setInsertionPoint(lastLoopOp);
+            Value nextIndVar = shiftElemsLoop.getInductionVar();
+            auto one = b.create<arith::ConstantIndexOp>(loc, 1);
+            nextIndVar = b.create<arith::AddIOp>(loc, nextIndVar, one);
+            Value idx0 = b.create<arith::ConstantIndexOp>(loc, 0);
+            Value out1Repl = b.create<tensor::ExtractOp>(loc, shiftElemsLoop.getRegionIterArgs()[0], ValueRange{idx0, nextIndVar});
+            Value out2Repl = b.create<tensor::ExtractOp>(loc, shiftElemsLoop.getRegionIterArgs()[1], ValueRange{idx0, nextIndVar});
+            Value newVals = b.create<tensor::InsertOp>(loc, shiftElemsLoop.getRegionIterArgs()[2], shiftElemsLoop.getRegionIterArgs()[0], ValueRange{idx0, nextIndVar});
+            Value newInds = b.create<tensor::InsertOp>(loc, shiftElemsLoop.getRegionIterArgs()[3], shiftElemsLoop.getRegionIterArgs()[1], ValueRange{idx0, nextIndVar});
+            SmallVector<Value> newOperands;
+            newOperands.push_back(newVals);
+            newOperands.push_back(newInds);
+            newOperands.push_back(out1Repl);
+            newOperands.push_back(out2Repl);
+            b.create<scf::YieldOp>(loc, newOperands);
+          }
+
+          lastLoopOp.erase();
+
+          // Get the smellest element as the last added element.
+          smElemElse = b.create<tensor::ExtractOp>(loc, shiftElemsLoop.getResult(0), ValueRange{idx0, ifExpand.getResult(0)});
+          addElemsElse = b.create<arith::AddIOp>(loc, ifExpand.getResult(0), one);
+          outValsElse = shiftElemsLoop.getResult(0);
+          outIndsElse = shiftElemsLoop.getResult(1);
+
+          // llvm::errs() << "\nLubo112-1\n";
+          // elemToInsertIfNeeded.print(llvm::errs());
+          // llvm::errs() << "\nLubo112-2\n";
+          // elemIndex.print(llvm::errs());
+          // llvm::errs() << "\nLubo112-4\n";
+          // outValsElse.print(llvm::errs());
+          // llvm::errs() << "\nLubo112-5\n";
+          // outIndsElse.print(llvm::errs());
+          // llvm::errs() << "\nLubo112-6\n";
+          // insertionIndex.print(llvm::errs());
+          // llvm::errs() << "\nLubo112-1 end\n";
+          // Insert the element in the output.
+          outValsElse = b.create<tensor::InsertOp>(loc, elemToInsertIfNeeded, outValsElse, ValueRange{idx0, insertionIndex});
+          outIndsElse = b.create<tensor::InsertOp>(loc, b.create<arith::IndexCastOp>(
+             loc, b.getIntegerType(32), elemIndex), outIndsElse, ValueRange{idx0, insertionIndex});
+
+          // llvm::errs() << "\nLubo35: " << "\n";
+          // shiftElemsLoop.print(llvm::errs());
+          // llvm::errs() << "\nLubo35: " << "end\n";
+          SmallVector<Value> newOperandsElse;
+          // Lubo TODO: Use the ones below.
+          newOperandsElse.push_back(outValsElse);
+          newOperandsElse.push_back(outIndsElse);
+          newOperandsElse.push_back(smElemElse);
+          newOperandsElse.push_back(addElemsElse);
+          b.create<scf::YieldOp>(loc, newOperandsElse);
+        });
+
+      Value outValsAtEnd = ifAddAtEnd.getResult(0);
+      Value outIndsAtEnd = ifAddAtEnd.getResult(1);
+      Value smElemAtEnd = ifAddAtEnd.getResult(2);
+      Value addElemsAtEnd = ifAddAtEnd.getResult(3);
+
+      SmallVector<Value> newOperands;
+      newOperands.push_back(outValsAtEnd);
+      newOperands.push_back(outIndsAtEnd);
+      newOperands.push_back(smElemAtEnd);
+      newOperands.push_back(addElemsAtEnd);
+      auto L_LuboRemove = b.create<scf::YieldOp>(loc, newOperands);
+      // llvm::errs() << "\nLubo55: " << "\n";
+      L_LuboRemove.print(llvm::errs());
+      // llvm::errs() << "\nLubo55: " << "end\n";
+    });
+  (void)ifAddElem; //Lubo TODO:
+  // Lubo TODO: Reenable this
+  return InsertElemContinuationValues{ifAddElem.getResult(0), ifAddElem.getResult(1),
+                                      ifAddElem.getResult(2), ifAddElem.getResult(3)};
+  // outVals = ifAddElem.getResult(0);
+  // outInds = ifAddElem.getResult(1);
+  // smallestElem = ifAddElem.getResult(2);
+  // addedElems = ifAddElem.getResult(3);
+}
+
+/// Vectorize a `topKOp` with (1) static result and input types
+static LogicalResult
+vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
+                         ArrayRef<int64_t> inputVectorSizes,
+                         SmallVectorImpl<Value> &newResults) {
+  OpBuilder::InsertionGuard g(rewriter);
+  rewriter.setInsertionPoint(topkOp);
+  Location loc = topkOp.getLoc();
+
+  ReifiedRankedShapedTypeDims reifiedReturnShapes;
+  LogicalResult status =
+      cast<ReifyRankedShapedTypeOpInterface>(topkOp.getOperation())
+          .reifyResultShapes(rewriter, reifiedReturnShapes);
+  assert(succeeded(status) && "failed to reify result shapes");
+
+  auto out0 = topkOp.getResults()[0];
+  auto resShapedTy0 = llvm::cast<ShapedType>(out0.getType());
+  auto out1 = topkOp.getResults()[1];
+  auto resShapedTy1 = llvm::cast<ShapedType>(out1.getType());
+
+  scf::ForOp scfInputLoop = dyn_cast<scf::ForOp>(topkOp->getParentRegion()->getParentOp());
+  if (!scfInputLoop)
+    return failure();
+
+  auto outIdxElemType = resShapedTy1.getElementType();
+  auto outValElemType = resShapedTy0.getElementType();
+
+  {
+    PatternRewriter::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPoint(scfInputLoop);
+    // Create a new loop based on the old one with adding the necessary
+    // iter_args.
+    if (failed(addIterArgs(rewriter, loc, scfInputLoop,
+                           outValElemType, outIdxElemType)))
+      return failure();
+  }
+
+  // Get the newly created loop.
+  auto regParent = topkOp->getParentRegion()->getParentOp();
+  // Lubo: TODO: Handle the case wherethe the size of the array is exactly 16 elems. There is no loop, so just need to codegen in this case.
+  // For now leave the non vector algo to take care of this.
+  if (!isa<scf::ForOp>(regParent))
+    return failure();
+// TODO: Lubo Fix the equal elements. If the biggest element is the same, they need to be reported in order of indexes.
+// TODO: Lubo Handle non specified second out.
+  scf::ForOp newLoop = dyn_cast<scf::ForOp>(regParent);
+  Value outputInitialized = newLoop.getRegionIterArgs()[2];
+  // The following if is used to initialize the out arrays.
+  // The outputs are the out0, out1, the smallest element added to the out0, 
+  // number of added elements.
+  auto ifInitOut = rewriter.create<scf::IfOp>(
+    loc, outputInitialized,
+    [&](OpBuilder &b, Location loc) {
+      Value outVals = newLoop.getRegionIterArgs()[0];
+      // Out indexes
+      Value outInds = newLoop.getRegionIterArgs()[1];
+      Value idx0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+      Value firstInElem = rewriter.create<tensor::ExtractOp>(loc, topkOp.values(), ValueRange{idx0, idx0});
+
+      // Add first values to the ouput arrays.
+      // Value zeroInt = rewriter.create<arith::ConstantOp>(
+      //                           loc, outIdxElemType, rewriter.getZeroAttr(outIdxElemType));
+      // Value r0 = rewriter.create<tensor::InsertOp>(loc, firstInElem, outVals, // Lubo20
+      //                                     ValueRange{idx0, idx0});
+      // Value r1 = rewriter.create<tensor::InsertOp>(loc, zeroInt, outInds,
+      //                                   ValueRange{idx0, idx0});
+      // Assign values to the smallestElem, addedElems, modified out vals and out indices.
+      auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
+      // (void)r0; // Lubo
+      // (void)r1; // Lubo
+
+      SmallVector<Value> operands;
+      // Lubo operands.push_back(outVals);
+      // Lubo operands.push_back(outInds);
+      operands.push_back(outVals); // Lubo 
+      operands.push_back(outInds); // Lubo
+      operands.push_back(firstInElem);
+      operands.push_back(zero);
+      b.create<scf::YieldOp>(loc, operands);
+    },
+    [&](OpBuilder &b, Location loc) {
+      // It is initialize. Just return the init_args values.
+      Value outVals = newLoop.getRegionIterArgs()[0];
+      // Out indexes
+      Value outInds = newLoop.getRegionIterArgs()[1];
+      SmallVector<Value> operands;
+      // TODO: Lubo comment!
+      operands.push_back(outVals);
+      operands.push_back(outInds);
+      operands.push_back(newLoop.getRegionIterArgs()[3]);
+      operands.push_back(newLoop.getRegionIterArgs()[4]);
+      b.create<scf::YieldOp>(loc, operands);
+    });
+
+  Type inElemTy = topkOp.getInputType().getElementType();
+  Value inValsVec = createReadOrMaskedRead(rewriter, loc, topkOp.getInputs()[0],
+                                        inputVectorSizes, inElemTy);
+  auto elemVecType = VectorType::get(inputVectorSizes, inElemTy);
+  Value smallestMask = rewriter.create<vector::BroadcastOp>(loc, elemVecType, ifInitOut.getResult(2));
+  Value comparedMask;
+  if (auto floatType = llvm::dyn_cast_if_present<FloatType>(outValElemType)) {
+    comparedMask = rewriter.create<arith::CmpFOp>(loc, mlir::arith::CmpFPredicate::OGT, inValsVec, smallestMask);
+  }
+  else if (auto intType = llvm::dyn_cast_if_present<IntegerType>(outValElemType)) {
+      comparedMask = rewriter.create<arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::sgt, inValsVec, smallestMask);
+  }
+  else {
+    return failure();
+  }
+
+
+  //rewriter.create<vector::PrintOp>(loc, inValsVec);
+  // rewriter.create<vector::PrintOp>(loc, smallestMask);//  Lubo11111
+  Value outNumElems = rewriter.create<arith::ConstantIndexOp>(loc, resShapedTy1.getDimSize(1));
+  // If the output is not filled yet, set the masks to true.
+  Value cmpAddedElems = rewriter.create<arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::slt,
+                                                        ifInitOut.getResult(3), outNumElems);
+  auto ifFillMask = rewriter.create<scf::IfOp>(loc, cmpAddedElems,
+    [&](OpBuilder &b, Location loc) {
+      Value tVal = rewriter.create<arith::ConstantIntOp>(loc, 1, 1);
+      Value allElemsMask = rewriter.create<vector::BroadcastOp>(loc,
+                                                                comparedMask.getType(),
+                                                                tVal);
+      SmallVector<Value> operands;
+      operands.push_back(allElemsMask);
+      b.create<scf::YieldOp>(loc, operands);
+    },
+    [&](OpBuilder &b, Location loc) {
+      // else
+      SmallVector<Value> operands;
+      operands.push_back(comparedMask);
+      b.create<scf::YieldOp>(loc, operands);
+    });
+    (void)ifFillMask; // Lubo remove
+
+  auto vecCmpCond = rewriter.create<vector::MultiDimReductionOp>(
+    loc, ifFillMask.getResult(0), rewriter.create<arith::ConstantIntOp>(loc, 0, 1),
+    SmallVector<bool>{1, 1}, vector::CombiningKind::OR);
+    (void)vecCmpCond; // Lubo 
+
+  auto ifVecCmp = rewriter.create<scf::IfOp>(loc, vecCmpCond,
+    [&](OpBuilder &b, Location loc) {
+      // There are bigger elemnets.
+      SmallVector<Value> maskProcessingLoopOps;
+      maskProcessingLoopOps.push_back(ifInitOut.getResult(0)); // Lubo TODO:
+      maskProcessingLoopOps.push_back(ifInitOut.getResult(1)); // Lubo TODO:
+      maskProcessingLoopOps.push_back(ifInitOut.getResult(2));
+      maskProcessingLoopOps.push_back(ifInitOut.getResult(3));
+      scf::YieldOp forYield;
+      scf::ForOp maskProcessingLoop = b.create<scf::ForOp>(loc,
+        b.create<arith::ConstantIndexOp>(loc, 0),
+        newLoop.getStep(),
+        b.create<arith::ConstantIndexOp>(loc, 1),
+        maskProcessingLoopOps,
+        [&](OpBuilder &bIn, Location nestedLoc, Value iv, ValueRange args) {
+          forYield = bIn.create<scf::YieldOp>(loc);
+        });
+
+      {
+        OpBuilder::InsertionGuard g(rewriter);
+        rewriter.setInsertionPoint(forYield);
+        SmallVector<OpFoldResult, 2> extractionIndices;
+        extractionIndices.push_back(rewriter.getIndexAttr(0));
+        extractionIndices.push_back(maskProcessingLoop.getInductionVar()); // Lubo
+        auto sourceVectorType = dyn_cast<VectorType>(ifFillMask.getResult(0).getType());
+        // if (!sourceVectorType)
+        //   return failure(); //. Lubo FIX
+
+        // The type here is always in the form 1x16xi1
+        // if (sourceVectorType.getRank() != 2)
+        //   return failure; // Lubo FIX!
+        llvm::errs() << "\nLubo110\n";
+        sourceVectorType.print(llvm::errs());
+        llvm::errs() << "\nLubo110 end\n";
+        bool hasLeadingDimUnitFixed =
+            ((sourceVectorType.getShape().front() == 1) &&
+            (!sourceVectorType.getScalableDims().front()));
+        // if (!hasLeadingDimUnitFixed)
+        //   return failure(); // Lubo FIX!
+        llvm::errs() << "\nLubo110.1" << hasLeadingDimUnitFixed << "\n";
+        sourceVectorType.print(llvm::errs());
+        llvm::errs() << "\nLubo110.1 end\n";
+        VectorType newVType = VectorType::Builder(sourceVectorType).dropDim(0);
+        llvm::errs() << "\nLubo110.2" << hasLeadingDimUnitFixed << "\n";
+        newVType.print(llvm::errs());
+        llvm::errs() << "\nLubo110.2 end\n";
+    // Drop leading/trailing unit dim by applying vector.shape_cast to all
+    // operands
+    // int64_t dim = hasLeadingDimUnitFixed ? 0 : sourceVectorType.getRank() - 1; // Lubo 
+        Value aCast = rewriter.create<vector::ShapeCastOp>(loc, newVType, ifFillMask.getResult(0));
+        // Lubo auto elemMask = rewriter.create<vector::ExtractOp>(loc, ifFillMask.getResult(0), extractionIndices);
+        auto elemMask = rewriter.create<vector::ExtractElementOp>(loc, aCast, maskProcessingLoop.getInductionVar()); 
+        // Lubo auto elemMask = rewriter.create<vector::ExtractOp>(loc, ifFillMask.getResult(0), extractionIndices);
+        Value goToOut = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, elemMask, rewriter.create<arith::ConstantIntOp>(loc, 1, 1));
+        auto insertElemIfNeeded = rewriter.create<scf::IfOp>(loc, goToOut,
+          [&](OpBuilder &bIn2, Location loc) {
+            // Value elemToInsertIfNeeded = bIn2.create<vector::ExtractOp>(loc, inValsVec, extractionIndices);
+            llvm::errs() << "\nLubo111-1\n";
+            inValsVec.print(llvm::errs());
+            llvm::errs() << "\nLubo111-1 end\n";
+            auto sourceVectorType = dyn_cast<VectorType>(inValsVec.getType());
+            // if (!sourceVectorType)  // Lubo 
+            // //   return failure(); //. Lubo FIX
+
+            // The type here is always in the form 1x16xf/i32
+            // if (sourceVectorType.getRank() != 2)
+            //   return failure; // Lubo FIX!
+            llvm::errs() << "\nLubo111\n";
+            sourceVectorType.print(llvm::errs());
+            llvm::errs() << "\nLubo111 end\n";
+            bool hasLeadingDimUnitFixed =
+                ((sourceVectorType.getShape().front() == 1) &&
+                (!sourceVectorType.getScalableDims().front()));
+            // if (!hasLeadingDimUnitFixed)
+            //   return failure(); // Lubo FIX!
+            llvm::errs() << "\nLubo111.1" << hasLeadingDimUnitFixed << "\n";
+            sourceVectorType.print(llvm::errs());
+            llvm::errs() << "\nLubo111.1 end\n";
+            VectorType newVType = VectorType::Builder(sourceVectorType).dropDim(0);
+            llvm::errs() << "\nLubo111.2" << hasLeadingDimUnitFixed << "\n";
+            newVType.print(llvm::errs());
+            llvm::errs() << "\nLubo110.2 end\n";
+            // Drop leading/trailing unit dim by applying vector.shape_cast to all
+            // operands
+            // Lubo int64_t dim = hasLeadingDimUnitFixed ? 0 : sourceVectorType.getRank() - 1; // Lubo 
+            Value aCast = bIn2.create<vector::ShapeCastOp>(loc, newVType, inValsVec);
+            // Lubo auto elemMask = rewriter.create<vector::ExtractOp>(loc, ifFillMask.getResult(0), extractionIndices);
+            auto elemToInsertIfNeeded = bIn2.create<vector::ExtractElementOp>(loc, aCast, maskProcessingLoop.getInductionVar()); 
+            // Lubo auto elemMask = rewriter.create<vector::ExtractOp>(loc, ifFillMask.getResult(0), extractionIndices);
+            Value elemIndex = bIn2.create<arith::AddIOp>(loc, maskProcessingLoop.getInductionVar(), newLoop.getInductionVar());
+            // Value outValsRef = outVals;
+            // Value outIndsRef = outInds;
+            // Value smallestElemRef = smallestElem;
+            // Value addedElemsRef = addedElems;
+            (void)elemToInsertIfNeeded; // Lubo TODO:
+            (void)elemIndex; // Lubo TODO:
+            InsertElemContinuationValues cont = insertElemInOutput(loc, bIn2, elemToInsertIfNeeded, elemIndex,
+                                outNumElems, InsertElemContinuationValues{
+                                  maskProcessingLoop.getRegionIterArgs()[0],
+                                  maskProcessingLoop.getRegionIterArgs()[1],
+                                  maskProcessingLoop.getRegionIterArgs()[2],
+                                  maskProcessingLoop.getRegionIterArgs()[3]});
+                                // Lubo {ifInitOut.getResult(0),
+                                // Lubo ifInitOut.getResult(1), ifInitOut.getResult(2), ifInitOut.getResult(3)});
+            // Lubo TODO: Use this instead of the following 4
+            // SmallVector<Value> operands;
+            // operands.push_back(outVals); // Lubo TODO:
+            // operands.push_back(outInds); // Lubo TODO:
+            // operands.push_back(smallestElemRef);
+            // operands.push_back(addedElemsRef);
+            // bIn2.create<scf::YieldOp>(loc, operands);
+            (void)cont; // Lubo Remove
+            SmallVector<Value> operands;
+            operands.push_back(cont.out0); // Lubo TODO:
+            operands.push_back(cont.out1); // Lubo TODO:
+            operands.push_back(cont.smallestElem);
+            operands.push_back(cont.addedElems);
+            // operands.push_back(ifInitOut.getResult(0)); // Lubo TODO:
+            // operands.push_back(ifInitOut.getResult(1)); // Lubo TODO:
+            // operands.push_back(ifInitOut.getResult(2));
+            // operands.push_back(ifInitOut.getResult(3));
+            bIn2.create<scf::YieldOp>(loc, operands);
+          },
+          [&](OpBuilder &bIn3, Location loc) {
+            // else No need to insert anything.
+            SmallVector<Value> operands;
+            operands.push_back(maskProcessingLoop.getRegionIterArgs()[0]); // Lubo TODO: 111
+            operands.push_back(maskProcessingLoop.getRegionIterArgs()[1]); // Lubo TODO:
+            operands.push_back(maskProcessingLoop.getRegionIterArgs()[2]);
+            operands.push_back(maskProcessingLoop.getRegionIterArgs()[3]);
+            // operands.push_back(ifInitOut.getResult(0)); // Lubo TODO: 111
+            // operands.push_back(ifInitOut.getResult(1)); // Lubo TODO:
+            // operands.push_back(ifInitOut.getResult(2));
+            // operands.push_back(ifInitOut.getResult(3));
+            bIn3.create<scf::YieldOp>(loc, operands);
+          });
+        SmallVector<Value> newOperands;
+        // Lubo TODO: Use this instead of the following.
+        newOperands.push_back(insertElemIfNeeded.getResult(0)); // Lubo TODO:
+        newOperands.push_back(insertElemIfNeeded.getResult(1)); // Lubo TODO:
+        newOperands.push_back(insertElemIfNeeded.getResult(2));
+        newOperands.push_back(insertElemIfNeeded.getResult(3));
+        (void)insertElemIfNeeded;// Lubo TODO:
+        // newOperands.push_back(outVals); // Lubo TODO:
+        // newOperands.push_back(outInds); // Lubo TODO:
+        // newOperands.push_back(smallestElem);
+        // newOperands.push_back(addedElems);
+        rewriter.create<scf::YieldOp>(loc, newOperands);
+        forYield.erase();
+      }
+
+          // llvm::errs() << "\nLubo36: " << "\n";
+          // maskProcessingLoop.print(llvm::errs());
+          // llvm::errs() << "\nLubo36: " << "end\n";
+
+      SmallVector<Value> operands;
+      // Lubo TODO:Use the following 4 lines, instead the ones below.
+      operands.push_back(maskProcessingLoop.getResult(0)); // Lubo: TODO
+      operands.push_back(maskProcessingLoop.getResult(1)); // Lubo TODO:
+      operands.push_back(maskProcessingLoop.getResult(2));
+      operands.push_back(maskProcessingLoop.getResult(3));
+      // operands.push_back(outVals); // Lubo TODO:
+      // operands.push_back(outInds); // Lubo TODO:
+      // operands.push_back(smallestElem);
+      // operands.push_back(addedElems);
+      b.create<scf::YieldOp>(loc, operands);
+      // SmallVector<Value> operands; // Lubo remove this and the next 4 lines
+      // operands.push_back(ifInitOut.getResult(0)); // Lubo TODO:
+      // operands.push_back(ifInitOut.getResult(1)); // Lubo TODO:
+      // operands.push_back(ifInitOut.getResult(2));
+      // operands.push_back(ifInitOut.getResult(3));
+      // b.create<scf::YieldOp>(loc, operands);
+    },
+    [&](OpBuilder &b, Location loc) {
+      // else
+      // No bigger elements. No work to do.
+      SmallVector<Value> operands;
+      operands.push_back(ifInitOut.getResult(0)); // Lubo TODO:
+      operands.push_back(ifInitOut.getResult(1)); // Lubo TODO:
+      operands.push_back(ifInitOut.getResult(2));
+      operands.push_back(ifInitOut.getResult(3));
+      b.create<scf::YieldOp>(loc, operands);
+    });
+  (void)ifVecCmp; // Lubo remove
+  // Create a new yield op for the loop.
+  {
+    OpBuilder::InsertionGuard g(rewriter);
+    scf::YieldOp yieldOp =
+      llvm::cast<scf::YieldOp>(newLoop.getBody()->getTerminator());
+    rewriter.setInsertionPoint(yieldOp);
+
+    // Value outValsRes = ifVecCmp.getResult(0); // Lubo use this 4 instead of the ones below
+    // Value outIndsRes = ifVecCmp.getResult(1);
+    // Value smallestElemRes = ifVecCmp.getResult(2);
+    // Value addedElemsRes = ifVecCmp.getResult(3);
+    // (void)outValsRes; // Lubo TODO:
+    // (void)outIndsRes; // Lubo TODO:
+    // (void)smallestElemRes; // Lubo TODO:
+    // (void)addedElemsRes; // Lubo TODO:
+    SmallVector<Value> operands;
+    operands.push_back(ifVecCmp.getResult(0));
+    operands.push_back(ifVecCmp.getResult(1));
+    // // After first run the out arrays are initialized.
+    operands.push_back(rewriter.create<arith::ConstantIntOp>(yieldOp.getLoc(), 0, 1));
+    operands.push_back(ifVecCmp.getResult(2));
+    operands.push_back(ifVecCmp.getResult(3)); // TODO: Lubo use these
+    // (void)ifInitOut; // Lubo ... Remove
+    // operands.push_back(newLoop.getRegionIterArgs()[0]);
+    // operands.push_back(newLoop.getRegionIterArgs()[1]);
+    // // After first run the out arrays are initialized.
+    // operands.push_back(rewriter.create<arith::ConstantIntOp>(yieldOp.getLoc(), 0, 1));
+    // operands.push_back(newLoop.getRegionIterArgs()[3]);
+    // operands.push_back(newLoop.getRegionIterArgs()[4]);
+    // Lubo
+    // llvm::errs() << "\nLubo25: " << outVals.getType() << "\n";
+    // llvm::errs() << "\nLubo26: " << outInds.getType() << "\n";
+    // llvm::errs() << "\nLubo27: " << smallestElem.getType() << "\n";
+    // llvm::errs() << "\nLubo28: " << addedElems.getType() << "\n";
+    // llvm::errs() << "\nLubo29: " << outValsRes.getType() << "\n";
+    // llvm::errs() << "\nLubo30: " << outIndsRes.getType() << "\n";
+    // llvm::errs() << "\nLubo31: " << smallestElemRes.getType() << "\n";
+    // llvm::errs() << "\nLubo32: " << addedElemsRes.getType() << "\n";
+    // Lubo end
+    rewriter.create<scf::YieldOp>(yieldOp.getLoc(), operands);
+    rewriter.eraseOp(yieldOp);
+  }
+
+  (void)newLoop; // Lubo TODO
+  llvm::errs() << "\nLubo33: " << "\n";
+  newLoop.print(llvm::errs());
+  llvm::errs() << "\nLubo33: " << "end\n";
+
+  // Value outValsOut = newLoop.getResult(0);
+  // Value outIndsOut = newLoop.getResult(1);
+  // newResults.push_back(outValsOut);
+  // newResults.push_back(outIndsOut);
+  newResults.push_back(topkOp.outputValues());
+  newResults.push_back(topkOp.outputIndices());
+  // newResults.push_back(newLoop.getResult(0));
+  // newResults.push_back(newLoop.getResult(1)); // Lubo use this
+
+  return success();
+}
 
 void GenericVectorizationPass::runOnOperation() {
   MLIRContext *context = &getContext();
   auto funcOp = getOperation();
-
   IRRewriter rewriter(context);
   SmallVector<Operation *> candidates;
+  llvm::errs() << "\nLubo-1: " << vectorizeTopk << "\n"; // Lubo Remove
+  std::cerr << "\nLubo-1: " << vectorizeTopk << "\n"; // Lubo Remove
   funcOp.walk([&](Operation *op) {
     if (isa<linalg::LinalgOp>(op)) {
       candidates.push_back(op);
@@ -325,6 +1312,9 @@ void GenericVectorizationPass::runOnOperation() {
       candidates.push_back(op);
     } else if (enableVectorMasking &&
                isa<tensor::PackOp, tensor::UnPackOp>(op)) {
+      candidates.push_back(op);
+    } else if (vectorizeTopk &&
+               isa<IREE::LinalgExt::TopkOp>(op)) {
       candidates.push_back(op);
     }
   });
@@ -350,13 +1340,44 @@ void GenericVectorizationPass::runOnOperation() {
       // to limit.
       if (enableVectorMasking) {
         if (std::accumulate(vectorSizes.begin(), vectorSizes.end(), 1,
-                            std::multiplies<int64_t>()) >= maxVectorSize)
+                            std::multiplies<int64_t>()) >= maxVectorSize) {
           continue;
+        }
       } else {
-        if (failed(isWithinVectorSizeLimit(linalgOp, maxVectorSize)))
+        if (failed(isWithinVectorSizeLimit(linalgOp, maxVectorSize))) {
           continue;
+        }
       }
+    } else if (auto topkOp = dyn_cast<IREE::LinalgExt::TopkOp>(op)) {
+      llvm::errs() << "\nLubo-1.1: " << vectorizeTopk << "\n"; // Lubo Remove
+      auto arg0 = topkOp.getInputs()[0];
+      auto shapedTy = llvm::cast<ShapedType>(arg0.getType());
+      vectorSizes.append(shapedTy.getShape().begin(), shapedTy.getShape().end());
+      if (shapedTy.isDynamicShape(vectorSizes))
+        continue;
     }
+    llvm::errs() << "\nLubo1: " << vectorizeTopk << "\n"; // Lubo Remove
+    if (auto topkOp = dyn_cast<IREE::LinalgExt::TopkOp>(op)) {
+      if (failed(vectorizeTopkOpPrecondition(topkOp, vectorSizes))) {
+        VEC_LDBG("Vectorization TopK pre-conditions failed\n");
+        llvm::errs() << "\nLubo11: " << vectorizeTopk << "\n"; // Lubo Remove
+        return; // falied.
+      }
+      llvm::errs() << "\nLubo2: " << vectorizeTopk << "\n"; // Lubo Remove
+      SmallVector<Value> results;
+      if (failed(vectorizeAsLinalgExtTopK(rewriter, topkOp, vectorSizes, results))) {
+        VEC_LDBG("TopK Vectorization failed\n");
+        return;
+      }
+llvm::errs() << "\nLubo3: " << vectorizeTopk << "\n"; // Lubo Remove
+      if (!results.empty())
+        rewriter.replaceOp(op, results);
+      else
+        rewriter.eraseOp(op);
+
+      return;
+    }
+
     // Pad scalable dims with `false` to match the vector sizes.
     scalableVecDims.resize(vectorSizes.size());
     (void)linalg::vectorize(rewriter, op, vectorSizes, scalableVecDims,

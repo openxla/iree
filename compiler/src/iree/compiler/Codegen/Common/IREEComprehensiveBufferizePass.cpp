@@ -201,8 +201,8 @@ runIREEOneShotBufferize(Operation *op,
 void IREEComprehensiveBufferizePass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   IREEOneShotBufferizationOptions options = getBufferizationOptions();
-  options.testAnalysisOnly = testAnalysisOnly;
-  options.printConflicts = printConflicts;
+  options.testAnalysisOnly = // testAnalysisOnly; // Lubo true
+  options.printConflicts = printConflicts; // Lubo  true
   options.allocationFn = allocationFn;
   options.memCpyFn = memCpyFn;
 
@@ -250,7 +250,7 @@ void addIREEComprehensiveBufferizePasses(
     OpPassManager &passManager,
     std::optional<BufferizationOptions::AllocationFn> allocationFn,
     std::optional<BufferizationOptions::MemCpyFn> memCpyFn) {
-  passManager.addPass(createEliminateEmptyTensorsPass());
+  // Lubo passManager.addPass(createEliminateEmptyTensorsPass());
   passManager.addPass(bufferization::createEmptyTensorToAllocTensorPass());
   passManager.addPass(
       createIREEComprehensiveBufferizePass(allocationFn, memCpyFn));

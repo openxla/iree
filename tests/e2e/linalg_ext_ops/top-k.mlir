@@ -1,4 +1,4 @@
-func.func @topk_1d_dim0_max() {
+func.func @topk_1d_dim0_max() { // Lubo: These are the tests...
   %input_values = util.unfoldable_constant dense<[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]> : tensor<10xf32>
   %input_indices = util.unfoldable_constant dense<[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]> : tensor<10xi32>
 
