@@ -8,12 +8,27 @@
 
 #if IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE
 
+#include <dlfcn.h>
+#include <pthread.h>
+#include <unistd.h>
+
 #include "experimental/rocm/status_util.h"
 
 // Total number of events per tracing context. This translates to the maximum
 // number of outstanding timestamp queries before collection is required.
 // To prevent spilling pages we leave some room for the context structure.
 #define IREE_HAL_ROCM_TRACING_DEFAULT_QUERY_CAPACITY (16 * 1024 - 256)
+
+typedef void (*SmuDumpCallback)(uint64_t, const char*, const char*, double);
+typedef bool (*SmuDumpInitFunc)(SmuDumpCallback callback);
+typedef void (*SmuDumpEndFunc)(void);
+typedef void (*SmuDumpOnceFunc)(void);
+typedef void (*RegDumpOnceFunc)(void);
+typedef void (*SviDumpOnceFunc)(void);
+typedef uint32_t (*RegGetTraceRate)(void);
+typedef uint32_t (*SmuGetTraceRate)(void);
+
+#define SMUTRACE_DLL "libsmutrace.so"
 
 struct iree_hal_rocm_tracing_context_t {
   iree_hal_rocm_context_wrapper_t* rocm_context;
@@ -37,7 +52,104 @@ struct iree_hal_rocm_tracing_context_t {
 
   // Event pool reused to capture tracing timestamps.
   hipEvent_t event_pool[IREE_HAL_ROCM_TRACING_DEFAULT_QUERY_CAPACITY];
+
+  void* smutrace_handle;
+  SmuDumpInitFunc f_smuDumpInit;
+  SmuDumpEndFunc f_smuDumpEnd;
+  SmuDumpOnceFunc f_smuDumpOnce;
+  RegDumpOnceFunc f_regDumpOnce;
+  SviDumpOnceFunc f_sviDumpOnce;
+  RegGetTraceRate f_regGetTraceRate;
+  SmuGetTraceRate f_smuGetTraceRate;
+  bool smutrace_enabled;
+  pthread_t var_dump_thread;
+  pthread_t smu_dump_thread;
+  pthread_t svi_dump_thread;
+  uint32_t m_reg_period;
+  uint32_t m_smu_period;
 };
+
+static uint64_t clocktime_ns() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ((uint64_t)ts.tv_sec * 1000000000) + ts.tv_nsec;
+}
+
+static void* dump_reg_variables_thread(void* ctx) {
+  iree_hal_rocm_tracing_context_t* context =
+      (iree_hal_rocm_tracing_context_t*)ctx;
+
+  int64_t startTime = clocktime_ns() / 1000;
+  int64_t best = INT64_MAX;
+
+  if (context != NULL) {
+    while (context->smutrace_enabled == true) {
+      context->f_regDumpOnce();
+
+      int64_t endTime = clocktime_ns() / 1000;
+      if (endTime - startTime < best) {
+        best = endTime - startTime;
+      }
+      int64_t sleepTime = startTime + context->m_reg_period - endTime;
+      sleepTime = (sleepTime > 0) ? sleepTime : 0;
+      usleep(sleepTime);
+      startTime = clocktime_ns() / 1000;
+    }
+  }
+
+  fprintf(stderr, "best time: %ld / %u\n", best, context->m_reg_period);
+
+  pthread_exit(NULL);
+}
+
+static void* dump_svi_variables_thread(void* ctx) {
+  iree_hal_rocm_tracing_context_t* context =
+      (iree_hal_rocm_tracing_context_t*)ctx;
+
+  int64_t startTime = clocktime_ns() / 1000;
+
+  if (context != NULL) {
+    while (context->smutrace_enabled == true) {
+      context->f_sviDumpOnce();
+
+      int64_t endTime = clocktime_ns() / 1000;
+      int64_t sleepTime = startTime + context->m_reg_period - endTime;
+      sleepTime = (sleepTime > 0) ? sleepTime : 0;
+      usleep(sleepTime);
+      startTime = clocktime_ns() / 1000;
+    }
+  }
+
+  pthread_exit(NULL);
+}
+
+static void* dump_smu_variables_thread(void* ctx) {
+  iree_hal_rocm_tracing_context_t* context =
+      (iree_hal_rocm_tracing_context_t*)ctx;
+
+  int64_t startTime = clocktime_ns() / 1000;
+
+  if (context != NULL) {
+    while (context->smutrace_enabled == true) {
+      context->f_smuDumpOnce();
+
+      int64_t endTime = clocktime_ns() / 1000;
+      int64_t sleepTime = startTime + context->m_smu_period - endTime;
+      sleepTime = (sleepTime > 0) ? sleepTime : 0;
+      usleep(sleepTime);
+      startTime = clocktime_ns() / 1000;
+    }
+  }
+
+  pthread_exit(NULL);
+}
+
+static void iree_smutrace_callback(uint64_t did, const char* type,
+                                   const char* name, double value) {
+  IREE_TRACE_SET_PLOT_TYPE(name, IREE_TRACING_PLOT_TYPE_NUMBER, true, true,
+                           0xFF0000FF);
+  IREE_TRACE_PLOT_VALUE_F64(name, value);
+}
 
 static iree_status_t iree_hal_rocm_tracing_context_initial_calibration(
     iree_hal_rocm_context_wrapper_t* rocm_context, hipStream_t stream,
@@ -128,6 +240,53 @@ iree_status_t iree_hal_rocm_tracing_context_allocate(
         timestamp_period);
   }
 
+  context->smutrace_enabled = false;
+  context->smutrace_handle = dlopen(SMUTRACE_DLL, RTLD_LAZY);
+  if (context->smutrace_handle) {
+    context->f_smuDumpInit =
+        (SmuDumpInitFunc)dlsym(context->smutrace_handle, "smuDumpInit");
+    context->f_smuDumpEnd =
+        (SmuDumpEndFunc)dlsym(context->smutrace_handle, "smuDumpEnd");
+    context->f_smuDumpOnce =
+        (SmuDumpOnceFunc)dlsym(context->smutrace_handle, "smuDumpOnce");
+    context->f_regDumpOnce =
+        (RegDumpOnceFunc)dlsym(context->smutrace_handle, "regDumpOnce");
+    context->f_sviDumpOnce =
+        (SviDumpOnceFunc)dlsym(context->smutrace_handle, "sviDumpOnce");
+    context->f_smuGetTraceRate = (SmuGetTraceRate)dlsym(
+        context->smutrace_handle, "getSmuVariablesCaptureRate");
+    context->f_regGetTraceRate = (RegGetTraceRate)dlsym(
+        context->smutrace_handle, "getRegisterExpressionCaptureRate");
+    context->smutrace_enabled =
+        (context->f_smuDumpInit && context->f_smuDumpEnd &&
+         context->f_smuDumpOnce && context->f_smuGetTraceRate &&
+         context->f_regGetTraceRate && context->f_regDumpOnce &&
+         context->f_sviDumpOnce &&
+         context->f_smuDumpInit(iree_smutrace_callback));
+  } else {
+    fprintf(stderr, "Warning: " SMUTRACE_DLL " could not be loaded!\n");
+  }
+
+  if (context->smutrace_enabled) {
+    context->m_reg_period = context->f_regGetTraceRate();
+    context->m_smu_period = context->f_smuGetTraceRate();
+    int ret = pthread_create(&context->var_dump_thread, NULL,
+                             dump_reg_variables_thread, context);
+    if (ret != 0) {
+      fprintf(stderr, "Warning: failed to create reg variables dump thread\n");
+    }
+    ret = pthread_create(&context->svi_dump_thread, NULL,
+                             dump_svi_variables_thread, context);
+    if (ret != 0) {
+      fprintf(stderr, "Warning: failed to create svi variables dump thread\n");
+    }
+    ret = pthread_create(&context->smu_dump_thread, NULL,
+                             dump_smu_variables_thread, context);
+    if (ret != 0) {
+      fprintf(stderr, "Warning: failed to create fw variables dump thread\n");
+    }
+  }
+
   if (iree_status_is_ok(status)) {
     *out_context = context;
   } else {
@@ -162,6 +321,15 @@ void iree_hal_rocm_tracing_context_free(
 
   iree_allocator_t host_allocator = context->host_allocator;
   iree_allocator_free(host_allocator, context);
+
+  if (context->smutrace_enabled) {
+    context->smutrace_enabled = false;
+    pthread_join(context->var_dump_thread, NULL);
+    pthread_join(context->smu_dump_thread, NULL);
+    pthread_join(context->svi_dump_thread, NULL);
+    context->f_smuDumpEnd();
+    dlclose(context->smutrace_handle);
+  }
 
   IREE_TRACE_ZONE_END(z0);
 }
