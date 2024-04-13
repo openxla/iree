@@ -146,8 +146,6 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
     return;
   case IREE::Codegen::DispatchLoweringPassPipeline::CPUDefault: {
     addCPUDefaultPassPipeline(pipeline);
-    // TilingConfig tilingConfig = getTilingConfigForPipeline(moduleOp); // Lubo
-    // addCPUDataTilingPipeline(pipeline, tilingConfig, enableVectorMasking);
     break;
   }
   case IREE::Codegen::DispatchLoweringPassPipeline::

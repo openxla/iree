@@ -269,17 +269,15 @@ def FuseTensorPadWithConsumer :
 def GenericVectorization :
     InterfacePass<"iree-codegen-generic-vectorization", "mlir::FunctionOpInterface"> {
   let summary = "Pass to perform vectorization on tensor/linalg ops.";
-  let options = [ // Lubo
+  let options = [
     Option<"enableVectorMasking", "enable-vector-masking", "bool",/*default=*/"false",
       "Enable vector masking during vectorization.">,
     Option<"useConfiguredVectorSizes", "use-configured-vector-sizes", "bool",/*default=*/"true",
       "Control whether the op lowering config represents a set of masked vector sizes">,
     Option<"vectorizePadding", "vectorize-padding", "bool", /*default=*/"false",
       "Rewrite all tensor.pad ops in the function to vector form.">,
-    // Lubo
-    Option<"vectorizeTopk", "vectorize-topk", "bool", /*default=*/"true", // Lubo
+    Option<"vectorizeTopk", "vectorize-topk", "bool", /*default=*/"false",
       "Rewrite all IREE.linalgext.TopkOp ops in the function to vector form.">,
-    // Lubo end
     Option<"vectorizeGatherAccesses", "vectorize-gather-accesses", "bool", /*default=*/"false",
       "Enable vectorizaiton of operations that may generate vector.gather operations.">,
     Option<"enableCleanup", "enable-cleanup", "bool",/*default=*/"true",

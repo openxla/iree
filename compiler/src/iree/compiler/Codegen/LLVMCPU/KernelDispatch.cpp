@@ -1174,7 +1174,6 @@ getMatmulCacheTileSizesForShape(ArrayRef<int64_t> inputTileSizes,
 static LogicalResult
 setRootConfig(mlir::FunctionOpInterface entryPointFn,
               linalg::ContractionOpInterface contractionOp) {
-  llvm::errs() << "\nLubo13\n"; 
   assert(!getLoweringConfig(contractionOp) &&
          "expected lowering_config is not set");
   auto linalgOp = cast<linalg::LinalgOp>(contractionOp.getOperation());
@@ -2038,67 +2037,20 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
       DispatchLoweringPassPipeline::CPUDoubleTilingExpert);
 }
 
-// Lubo
 static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
                                    IREE::LinalgExt::TopkOp topkOp) {
-  // SmallVector<int64_t> lbs, ubs;
-  // getRangeBounds(cast<TilingInterface>(topkOp.getOperation()), lbs, ubs);
-
-  // int64_t numLoops = lbs.size();
-  // unsigned typeWidthInBytes = IREE::Util::getRoundedElementByteWidth(
-  //     topkOp.getInputType().getElementType());
-  // int64_t typeVectorSize = getVectorSize(entryPointFn, typeWidthInBytes);
-  // DistributionHeuristicConfig distConfig;
-  // distConfig.vectorSizeHints.append(numLoops, 1);
-  // if (!ShapedType::isDynamic(ubs.back())) {
-  //    distConfig.vectorSizeHints.back() = std::min(typeVectorSize, ubs.back());
-  // }
-  // SmallVector<int64_t> distTileSizes =
-  //     getDefaultDistributedLevelTileSizes(topkOp, distConfig);
-  // // No further tiling for reduction and inner parallel loops.
-  // SmallVector<int64_t> zeros(numLoops, 0);
-  // // Lubo distConfig.vectorSizeHints.back() = 0;
-  // distTileSizes[0] = 0;
-  // distTileSizes[1] = 1;
-  // distConfig.vectorSizeHints[0] = 0;
-  // llvm::errs() << "\nLubo10.1: " << distConfig.vectorSizeHints.size() << "\n";
-  // llvm::errs() << "\nLubo10.2: " << distTileSizes.size() << "\n";
-  // llvm::errs() << "\nLubo10.3: " << distConfig.vectorSizeHints[1] << ":" << distConfig.vectorSizeHints[0] << "\n";
-  // llvm::errs() << "\nLubo10.4: " << distTileSizes[1] << ":" << distTileSizes[0] << "\n";
-  // llvm::errs() << "\nLubo10.5: " << typeWidthInBytes << ":" << typeVectorSize << "\n";
-  // llvm::errs() << "\nLubo10.6: " << numLoops << ":" << "\n";
-  // llvm::errs() << "\nLubo10.7: " << lbs.size() << ":" << lbs[1] << ":" << lbs[0] << "\n";
-  
-  // // Lubo *std::prev(distConfig.vectorSizeHints.end(), 2) = 16; // TODO: Lubo
-  // // TileSizesListType tileSizes = {distTileSizes, distConfig.vectorSizeHints, zeros, zeros};
-  // TileSizesListType tileSizes = {zeros, distConfig.vectorSizeHints, zeros, zeros};
-  // return setOpConfigAndEntryPointFnTranslation(
-  //     entryPointFn, topkOp, tileSizes,
-  //     DispatchLoweringPassPipeline::CPUDoubleTilingExpert);
-
-  // SmallVector<int64_t> distTileSizes = getDefaultDistributedLevelTileSizes(
-  //     topkOp, DistributionHeuristicConfig{});
-  // int64_t iterationDomainRank = 2;
-  // There are some dimensions are not tiled. Set vector tile sizes being ones
-  // to avoid huge vectors.
-  // TODO: We should be able to tile other dimensions.
   unsigned typeWidthInBytes = IREE::Util::getRoundedElementByteWidth(
       topkOp.getInputType().getElementType());
   int64_t typeVectorSize = getVectorSize(entryPointFn, typeWidthInBytes);
-  llvm::errs() << "\nLubo10.1: " << typeWidthInBytes << ":" << typeVectorSize << "\n";
   SmallVector<int64_t> vecTileSizes{0, typeVectorSize};
-  llvm::errs() << "\nLubo10.3: " << vecTileSizes[1] << ":" << vecTileSizes[0] << "\n";
   SmallVector<int64_t> distTileSizes = getDefaultDistributedLevelTileSizes(
       topkOp, DistributionHeuristicConfig{});
-  distTileSizes = {1, 0}; // {4, 0};
+  distTileSizes = {1, 0};
   TileSizesListType tileSizes = {distTileSizes, vecTileSizes};
-  llvm::errs() << "\nLubo10.3: " << vecTileSizes[1] << ":" << vecTileSizes[0] << "\n";
-  llvm::errs() << "\nLubo10.4: " << distTileSizes[1] << ":" << distTileSizes[0] << "\n";
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, topkOp, tileSizes,
       DispatchLoweringPassPipeline::CPULinalgExtTileAndVectorize);
 }
-// Lubo end
 
 /// Set the default configuration for operations that implement the
 /// `TiledOpInterface`.
@@ -2108,9 +2060,6 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
   SmallVector<int64_t> distTileSizes =
       getDefaultDistributedLevelTileSizes(op, DistributionHeuristicConfig{});
   TileSizesListType tileSizes = {distTileSizes};
-  // Lubo
-  llvm::errs() << "\nLubo5\n";
-  // Lubo end
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, op, tileSizes, DispatchLoweringPassPipeline::CPUDefault);
 }
@@ -2119,11 +2068,9 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
 static LogicalResult
 setRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op,
                   const TargetMLTransformInfo &targetMLTransInfo) {
-  llvm::errs() << "\nLubo6\n";
   auto setRootConfigFn = [&](Operation *op) -> LogicalResult {
     return TypeSwitch<Operation *, LogicalResult>(op)
         .Case<linalg::GenericOp>([&](auto op) {
-          llvm::errs() << "\nLubo7\n";
           return setRootConfig(entryPointFn, op, LinalgOpInfo(op),
                                targetMLTransInfo);
         })
@@ -2138,14 +2085,13 @@ setRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op,
               linalg::PoolingNhwcMinUnsignedOp, linalg::PoolingNchwSumOp,
               linalg::PoolingNchwMaxOp, linalg::DepthwiseConv2DNhwcHwcOp>(
             [&](auto op) {
-              llvm::errs() << "\nLubo9\n";
               return setConvInterfaceRootConfig(entryPointFn, op);
             })
         .Case<linalg::ContractionOpInterface>(
-            [&](auto op) { llvm::errs() << "\nLubo10\n"; return setRootConfig(entryPointFn, op); })
+            [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<TilingInterface>(
-            [&](auto op) { llvm::errs() << "\nLubo12\n"; return setRootConfig(entryPointFn, op); })
-        .Default([&](Operation *op) { llvm::errs() << "\nLubo11\n"; return success(); });
+            [&](auto op) { return setRootConfig(entryPointFn, op); })
+        .Default([&](Operation *op) { return success(); });
   };
   return setRootConfigFn(op);
 }

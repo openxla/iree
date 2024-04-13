@@ -54,6 +54,12 @@ static llvm::cl::opt<bool> clUseFastMinMaxOps(
         "Use `arith.minf/maxf` instead of `arith.minimumf/maximumf` ops"),
     llvm::cl::init(false));
 
+static llvm::cl::opt<bool> clVectorizeTopk(
+    "iree-llvmcpu-vectorize-topk-ops",
+    llvm::cl::desc(
+        "Vectorize TopK operations ops"),
+    llvm::cl::init(false));
+
 // TODO(#10820): Delete the flag. This should be a nop pass to default pipeline
 // while tensor.pad op is lowered to fill + insert_slice before Codegen.
 // However, it causes regressions in terms of compilation time. Skip the passes
@@ -110,13 +116,6 @@ static void addTileAndDistributePasses(OpPassManager &pm) {
       createConcretizePadResultShapePass());
   nestedModulePM.addNestedPass<func::FuncOp>(
       IREE::LinalgExt::createTileAndDecomposeWinogradTransformPass());
-  // Lubo
-  // GenericVectorizationPassOptions options;
-  //   options.enableVectorMasking = true;
-  //   nestedModulePM.addNestedPass<func::FuncOp>(
-  //     createGenericVectorizationPass(options));
-
-  // Lubo end
 }
 
 //===---------------------------------------------------------------------===//
@@ -331,8 +330,6 @@ void buildLLVMCPUVectorLoweringPipeline(
 void addCPUBufferOpsTileAndVectorizePipeline(
     OpPassManager &passManager, TilingConfig &tilingConfig,
     LLVMCPUPipelineOptions &pipelineOpt) {
-  std::cerr << "\nLubo11\n";
-
   addTileAndDistributePasses(passManager);
 
   // Skip tiling reduction loops because this is expected to apply on copy ops
@@ -346,6 +343,7 @@ void addCPUBufferOpsTileAndVectorizePipeline(
     options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizeGatherAccesses = true;
+    options.vectorizeTopk = clVectorizeTopk;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -432,6 +430,7 @@ void addMultiTilingExpertPassPipeline(OpPassManager &passManager,
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
+    options.vectorizeTopk = clVectorizeTopk;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -497,6 +496,7 @@ void addConvTileAndDecomposeExpertPassPipeline(
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
+    options.vectorizeTopk = clVectorizeTopk;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -581,6 +581,7 @@ void addMmt4dTilingExpertPassPipeline(OpPassManager &passManager,
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
+    options.vectorizeTopk = clVectorizeTopk;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -621,6 +622,7 @@ void addCPUDataTilingPipeline(OpPassManager &passManager,
     options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.vectorizePadding = true;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
+    options.vectorizeTopk = clVectorizeTopk;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -654,6 +656,7 @@ void addCPULinalgExtTileAndVectorizePipeline(
     GenericVectorizationPassOptions options;
     options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
+    options.vectorizeTopk = clVectorizeTopk;
     nestedModulePM.addNestedPass<func::FuncOp>(
         createGenericVectorizationPass(options));
     nestedModulePM.addNestedPass<func::FuncOp>(
@@ -676,13 +679,6 @@ void addCPUDefaultPassPipeline(OpPassManager &passManager) {
   addTileAndDistributePasses(passManager);
   OpPassManager &nestedModulePM = passManager.nest<ModuleOp>();
   addCPUBufferizePasses(nestedModulePM);
-  // // Lubo
-  // // Generic vector lowering.
-  // LLVMCPUVectorLoweringPassOptions options;
-  // // options.lowerVectorTransposeToAVX2 = lowerToAVX2;
-  // // options.splitVectorTransfersTo = "linalg-copy";
-  // buildLLVMCPUVectorLoweringPipeline(nestedModulePM, options);
-  // // Lubo end
 }
 
 void addTransformDialectPasses(OpPassManager &passManager,
