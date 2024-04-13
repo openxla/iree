@@ -115,10 +115,9 @@ void LLVMCPULowerExecutableTargetPass::runOnOperation() {
   // No pipleline specified, nothing to do.
   case IREE::Codegen::DispatchLoweringPassPipeline::None:
     return;
-  case IREE::Codegen::DispatchLoweringPassPipeline::CPUDefault: {
+  case IREE::Codegen::DispatchLoweringPassPipeline::CPUDefault:
     addCPUDefaultPassPipeline(pipeline);
     break;
-  }
   case IREE::Codegen::DispatchLoweringPassPipeline::
       CPUBufferOpsTileAndVectorize: {
     TilingConfig tilingConfig = getTilingConfigForPipeline(funcOp);

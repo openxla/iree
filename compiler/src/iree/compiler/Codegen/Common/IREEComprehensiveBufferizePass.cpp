@@ -200,8 +200,8 @@ runIREEOneShotBufferize(Operation *op,
 void IREEComprehensiveBufferizePass::runOnOperation() {
   auto funcOp = getOperation();
   IREEOneShotBufferizationOptions options = getBufferizationOptions();
-  options.testAnalysisOnly = // testAnalysisOnly; // Lubo true
-  options.printConflicts = printConflicts; // Lubo  true
+  options.testAnalysisOnly = testAnalysisOnly;
+  options.printConflicts = printConflicts;
   options.allocationFn = allocationFn;
   options.memCpyFn = memCpyFn;
 

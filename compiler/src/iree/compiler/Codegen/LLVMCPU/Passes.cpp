@@ -54,11 +54,10 @@ static llvm::cl::opt<bool> clUseFastMinMaxOps(
         "Use `arith.minf/maxf` instead of `arith.minimumf/maximumf` ops"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<bool> clVectorizeTopk(
-    "iree-llvmcpu-vectorize-topk-ops",
-    llvm::cl::desc(
-        "Vectorize TopK operations ops"),
-    llvm::cl::init(false));
+static llvm::cl::opt<bool>
+    clVectorizeTopk("iree-llvmcpu-vectorize-topk-ops",
+                    llvm::cl::desc("Vectorize TopK operations ops"),
+                    llvm::cl::init(false));
 
 // TODO(#10820): Delete the flag. This should be a nop pass to default pipeline
 // while tensor.pad op is lowered to fill + insert_slice before Codegen.

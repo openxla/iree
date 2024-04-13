@@ -23,10 +23,6 @@
 
 #define DEBUG_TYPE "iree-llvmcpu-tile"
 
-// Lubo
-#include <iostream>
-// Lubo end
-
 namespace mlir::iree_compiler {
 
 namespace {
@@ -48,7 +44,6 @@ struct LLVMCPUTilePass : LLVMCPUTileBase<LLVMCPUTilePass> {
 };
 
 void LLVMCPUTilePass::runOnOperation() {
-  std::cerr << "\nLubo10:\n";
   if (tilingLevel == -1) {
     LLVM_DEBUG(llvm::dbgs() << "tilingLevel not set, skip tiling\n");
     return;

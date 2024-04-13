@@ -2076,8 +2076,7 @@ setRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op,
         })
         .Case<IREE::LinalgExt::AttentionOp, IREE::LinalgExt::FftOp,
               tensor::PackOp, tensor::PadOp, IREE::LinalgExt::TopkOp,
-              tensor::UnPackOp, linalg::Mmt4DOp,
-              linalg::BatchMmt4DOp>(
+              tensor::UnPackOp, linalg::Mmt4DOp, linalg::BatchMmt4DOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
         .Case<linalg::Conv2DNhwcHwcfOp, linalg::Conv2DNchwFchwOp,
               linalg::PoolingNhwcSumOp, linalg::PoolingNhwcMaxOp,
