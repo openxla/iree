@@ -30,13 +30,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
 
-<<<<<<< HEAD
-#include <iostream>
-
-#define DEBUG_TYPE "iree-llvm-cpu-lowering-pass-pipeline"
-=======
 #define DEBUG_TYPE "iree-llvmcpu-pass-pipelines"
->>>>>>> upstream
 
 namespace mlir::iree_compiler {
 
@@ -414,20 +408,11 @@ void addMultiTilingExpertPassPipeline(OpPassManager &funcPassManager,
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
-<<<<<<< HEAD
     options.vectorizeTopk = clVectorizeTopk;
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createGenericVectorizationPass(options));
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createOptimizeTensorInsertExtractSlicesPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
-=======
     funcPassManager.addPass(createGenericVectorizationPass(options));
     funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
     funcPassManager.addPass(createCanonicalizerPass());
     funcPassManager.addPass(createCSEPass());
->>>>>>> upstream
   }
 
   addCPUBufferizePasses(funcPassManager);
@@ -478,20 +463,11 @@ void addConvTileAndDecomposeExpertPassPipeline(
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
-<<<<<<< HEAD
     options.vectorizeTopk = clVectorizeTopk;
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createGenericVectorizationPass(options));
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createOptimizeTensorInsertExtractSlicesPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
-=======
     funcPassManager.addPass(createGenericVectorizationPass(options));
     funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
     funcPassManager.addPass(createCanonicalizerPass());
     funcPassManager.addPass(createCSEPass());
->>>>>>> upstream
   }
 
   // Eliminate redundant transfer_read/write to avoid stack allocations.
@@ -562,20 +538,11 @@ void addMmt4dTilingExpertPassPipeline(OpPassManager &funcPassManager,
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
     options.vectorizePadding = true;
     options.vectorizeGatherAccesses = true;
-<<<<<<< HEAD
     options.vectorizeTopk = clVectorizeTopk;
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createGenericVectorizationPass(options));
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createOptimizeTensorInsertExtractSlicesPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
-=======
     funcPassManager.addPass(createGenericVectorizationPass(options));
     funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
     funcPassManager.addPass(createCanonicalizerPass());
     funcPassManager.addPass(createCSEPass());
->>>>>>> upstream
   }
 
   funcPassManager.addPass(createCanonicalizerPass());
@@ -607,20 +574,11 @@ void addCPUDataTilingPipeline(OpPassManager &funcPassManager,
     options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.vectorizePadding = true;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
-<<<<<<< HEAD
     options.vectorizeTopk = clVectorizeTopk;
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createGenericVectorizationPass(options));
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createOptimizeTensorInsertExtractSlicesPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
-=======
     funcPassManager.addPass(createGenericVectorizationPass(options));
     funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
     funcPassManager.addPass(createCanonicalizerPass());
     funcPassManager.addPass(createCSEPass());
->>>>>>> upstream
   }
 
   addCPUBufferizePasses(funcPassManager);
@@ -647,20 +605,11 @@ void addCPULinalgExtTileAndVectorizePipeline(
     GenericVectorizationPassOptions options;
     options.useConfiguredVectorSizes = pipelineOpt.useConfiguredVectorSizes;
     options.enableVectorMasking = pipelineOpt.enableVectorMasking;
-<<<<<<< HEAD
     options.vectorizeTopk = clVectorizeTopk;
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createGenericVectorizationPass(options));
-    nestedModulePM.addNestedPass<func::FuncOp>(
-        createOptimizeTensorInsertExtractSlicesPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCanonicalizerPass());
-    nestedModulePM.addNestedPass<func::FuncOp>(createCSEPass());
-=======
     funcPassManager.addPass(createGenericVectorizationPass(options));
     funcPassManager.addPass(createOptimizeTensorInsertExtractSlicesPass());
     funcPassManager.addPass(createCanonicalizerPass());
     funcPassManager.addPass(createCSEPass());
->>>>>>> upstream
   }
 
   addCPUBufferizePasses(funcPassManager);
