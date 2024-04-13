@@ -352,7 +352,7 @@ func.func @vector_topk_test_4x1024_int() {
 }
 
 func.func @vector_call_topk_1x256128() {
-  % input_values = util.unfoldable_constant dense<[[
+  %input_values = util.unfoldable_constant dense<[[
     1.3, 2.0, 3.0, 4.0,  1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0,
     4.0, 1.0, 2.0, 3.0,  4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0,
     3.0, 4.0, 1.3, 2.0,  3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0,
