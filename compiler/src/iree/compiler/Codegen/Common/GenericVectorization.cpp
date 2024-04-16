@@ -299,7 +299,6 @@ public:
     this->enableVectorMasking.setValue(options.enableVectorMasking);
     this->useConfiguredVectorSizes.setValue(options.useConfiguredVectorSizes);
     this->vectorizePadding.setValue(options.vectorizePadding);
-    this->vectorizeTopk.setValue(options.vectorizeTopk);
     this->vectorizeGatherAccesses.setValue(options.vectorizeGatherAccesses);
     this->enableCleanup.setValue(options.enableCleanup);
     this->generateContract.setValue(options.generateContract);
@@ -1128,7 +1127,7 @@ void GenericVectorizationPass::runOnOperation() {
     } else if (enableVectorMasking &&
                isa<tensor::PackOp, tensor::UnPackOp>(op)) {
       candidates.push_back(op);
-    } else if (vectorizeTopk && isa<IREE::LinalgExt::TopkOp>(op)) {
+    } else if (isa<IREE::LinalgExt::TopkOp>(op)) {
       candidates.push_back(op);
     }
   });

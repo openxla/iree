@@ -165,7 +165,6 @@ struct GenericVectorizationPassOptions {
   bool useConfiguredVectorSizes = true;
   bool vectorizePadding = false;
   bool vectorizeGatherAccesses = false;
-  bool vectorizeTopk = false;
 
   // The flag controls whether it touches the structure generated from tiling,
   // which affects later steps like bufferization and vector hoisting.

@@ -291,9 +291,6 @@ def GenericVectorization : InterfacePass<"iree-codegen-generic-vectorization",
        Option<"vectorizePadding", "vectorize-padding", "bool",
               /*default=*/"false",
               "Rewrite all tensor.pad ops in the function to vector form.">,
-       Option<"vectorizeTopk", "vectorize-topk", "bool", /*default=*/"false",
-              "Rewrite all IREE.linalgext.TopkOp ops in the function to vector "
-              "form.">,
        Option<"vectorizeGatherAccesses", "vectorize-gather-accesses", "bool",
               /*default=*/"false",
               "Enable vectorizaiton of operations that may generate "

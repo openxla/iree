@@ -95,6 +95,11 @@ llvm::cl::opt<bool> clEnableTransformDialectJit(
     llvm::cl::desc("enable the usage of the transform dialect JIT"),
     llvm::cl::init(false));
 
+llvm::cl::opt<bool>
+    clVectorizeTopk("iree-llvmcpu-vectorize-topk",
+                    llvm::cl::desc("Vectorizes TopK operations if appropriate"),
+                    llvm::cl::init(false));
+
 using IREE::Codegen::DispatchLoweringPassPipeline;
 
 // Encodes the pre-processing strategy to be applied on a Linalg operation
@@ -2075,9 +2080,16 @@ setRootConfigImpl(mlir::FunctionOpInterface entryPointFn, Operation *op,
                                targetMLTransInfo);
         })
         .Case<IREE::LinalgExt::AttentionOp, IREE::LinalgExt::FftOp,
-              tensor::PackOp, tensor::PadOp, IREE::LinalgExt::TopkOp,
-              tensor::UnPackOp, linalg::Mmt4DOp, linalg::BatchMmt4DOp>(
+              tensor::PackOp, tensor::PadOp, tensor::UnPackOp, linalg::Mmt4DOp,
+              linalg::BatchMmt4DOp>(
             [&](auto op) { return setRootConfig(entryPointFn, op); })
+        .Case<IREE::LinalgExt::TopkOp>([&](auto op) {
+          if (clVectorizeTopk)
+            return setRootConfig(entryPointFn, op);
+          else
+            return setRootConfig(entryPointFn,
+                                 static_cast<TilingInterface>(op));
+        })
         .Case<linalg::Conv2DNhwcHwcfOp, linalg::Conv2DNchwFchwOp,
               linalg::PoolingNhwcSumOp, linalg::PoolingNhwcMaxOp,
               linalg::PoolingNhwcMaxUnsignedOp, linalg::PoolingNhwcMinOp,
