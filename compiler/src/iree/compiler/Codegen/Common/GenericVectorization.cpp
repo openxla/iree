@@ -845,8 +845,8 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
       cast<ReifyRankedShapedTypeOpInterface>(topkOp.getOperation())
           .reifyResultShapes(rewriter, reifiedReturnShapes);
   assert(succeeded(status) && "failed to reify result shapes");
-  
-  if (failed(status)) 
+
+  if (failed(status))
     return failure();
 
   auto out0 = topkOp.getResults()[0];
