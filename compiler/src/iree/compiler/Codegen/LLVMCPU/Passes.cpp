@@ -387,6 +387,8 @@ void addMultiTilingExpertPassPipeline(OpPassManager &funcPassManager,
   if (pipelineOpt.enableAArch64SSVE) {
     funcPassManager.addPass(createLLVMCPU2DScalableTo1DScalablePass());
   }
+  nestedModulePM.addNestedPass<func::FuncOp>(
+      createDecomposeMatmulTransposeBPass());
 
   {
     funcPassManager.addPass(createVectorizePadPass());
