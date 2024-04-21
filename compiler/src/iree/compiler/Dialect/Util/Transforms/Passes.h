@@ -47,7 +47,7 @@ struct ExprHoistingOptions {
 
   // Threshold for controlling the maximum allowed increase in the stored size
   // of a single global as a result of hoisting.
-  int64_t maxSizeIncreaseThreshold = 2147483647;
+  int64_t maxSizeIncreaseThreshold = 0;
 };
 std::unique_ptr<OperationPass<mlir::ModuleOp>>
 createHoistIntoGlobalsPass(const ExprHoistingOptions &options);
