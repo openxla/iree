@@ -18,8 +18,6 @@ iree_check_single_backend_test_suite(
     "scan.mlir"
     "scatter.mlir"
     "sort.mlir"
-    # Top-k-vector tests disabled due to an error for vector_call_topk_1x256.
-    # "top-k-vector.mlir"
     "top-k.mlir"
   TARGET_BACKEND
     "cuda"
@@ -37,8 +35,6 @@ iree_check_single_backend_test_suite(
   NAME
     check_cuda-topk-split-reduction
   SRCS
-    # Top-k-vector tests disabled due to an error for vector_call_topk_1x256.
-    # "top-k-vector.mlir",
     "top-k.mlir"
   TARGET_BACKEND
     "cuda"
@@ -58,8 +54,6 @@ iree_check_single_backend_test_suite(
   NAME
     check_cuda-topk-split-reduction-double
   SRCS
-    # Top-k-vector tests disabled due to an error for vector_call_topk_1x256.
-    # "top-k-vector.mlir",
     "top-k.mlir"
   TARGET_BACKEND
     "cuda"
