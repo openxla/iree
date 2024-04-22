@@ -101,7 +101,6 @@ iree_check_single_backend_test_suite(
     "scan.mlir"
     "scatter.mlir"
     "sort.mlir"
-    "top-k-vector.mlir"
     "top-k.mlir"
   TARGET_BACKEND
     "vmvx"
