@@ -319,6 +319,8 @@ public:
 ///   2. `inputVectorSizes` does nos have dynamic dimensions.
 ///   3. All the values in `inputVectorSizes` are greater than or equal to
 ///      static sizes in `shape`.
+/// TODO: lubol Remove when PR https://github.com/llvm/llvm-project/pull/89119
+/// is propagated.
 static LogicalResult
 isValidMaskedInputVector(ArrayRef<int64_t> shape,
                          ArrayRef<int64_t> inputVectorSizes) {
@@ -395,9 +397,6 @@ static scf::ForOp replaceForOpWithNewSignature(RewriterBase &rewriter,
   newLoop.getRegion().getBlocks().splice(
       newLoop.getRegion().getBlocks().begin(), loop.getRegion().getBlocks());
 
-  newLoop.getBody()->getTerminator()->print(llvm::errs());
-
-  // newLoop.getRegion().print(llvm::errs());
   for (Value operand : newInitArgs) {
     newLoop.getBody()->addArgument(operand.getType(), operand.getLoc());
   }
@@ -415,6 +414,15 @@ static scf::ForOp replaceForOpWithNewSignature(RewriterBase &rewriter,
 }
 
 /// Add the necessary IterArgs to the input iterating loop.
+// This function rewrites the outer loop of the vector tile and
+// insert new ioter_args for the loop to support the topk
+// algorithm implementation.
+// Note: The iter_args to the loop is in the format:
+// 1. Value for the out0 tensor (already added by the tiling)
+// 2. Value for the out1 tensor (already added by the tiling)
+// 3. an i1 value denoting wheter the smallestElem was initialized.
+// 4. Value for the smallestElem (smallest element added to the out0 tensor)
+// 5. Number of elements added to the out tensors.
 static LogicalResult addIterArgs(RewriterBase &rewriter, Location loc,
                                  scf::ForOp loop, Type outValType,
                                  Type outIdxType) {
@@ -435,11 +443,11 @@ static LogicalResult addIterArgs(RewriterBase &rewriter, Location loc,
     newOperands.push_back(it->second);
   }
 
-  // // Add an arg wheter smallestElem was initialized
+  // Add an arg wheter smallestElem was initialized
   Value firstElemInit = rewriter.create<arith::ConstantIntOp>(loc, 1, 1);
   newOperands.push_back(firstElemInit);
 
-  // Add an arg for the smallest element added to the out array
+  // Add args placeholders for the smallest element added to the out array
   Value smallestOut;
   if (auto floatType = llvm::dyn_cast_if_present<FloatType>(outValType)) {
     smallestOut = rewriter.create<arith::ConstantFloatOp>(
@@ -472,34 +480,46 @@ static LogicalResult addIterArgs(RewriterBase &rewriter, Location loc,
 /// Create a TransferReadOp from `source` with static shape `readShape`. If the
 /// vector type for the read is not the same as the type of `source`, then a
 /// mask is created on the read.
-static Value createReadOrMaskedRead(RewriterBase &rewriter, Location loc,
+// TODO: lubol Remove when PR https://github.com/llvm/llvm-project/pull/89119 is
+// propagated.
+Value static createReadOrMaskedRead(OpBuilder &builder, Location loc,
                                     Value source, ArrayRef<int64_t> readShape,
-                                    Type elemType) {
+                                    Value padValue,
+                                    bool useInBoundsInsteadOfMasking = false) {
   assert(llvm::none_of(readShape,
-                       [](int64_t s) { return s == ShapedType::kDynamic; }));
-  Value padValue = rewriter.create<arith::ConstantOp>(
-      loc, elemType, rewriter.getZeroAttr(elemType));
-  auto sourceShape = dyn_cast<ShapedType>(source.getType()).getShape();
-  assert(sourceShape.size() == readShape.size());
-  auto maskType = VectorType::get(readShape, rewriter.getI1Type());
+                       [](int64_t s) { return s == ShapedType::kDynamic; }) &&
+         "expected static shape");
+  auto sourceShapedType = cast<ShapedType>(source.getType());
+  auto sourceShape = sourceShapedType.getShape();
+  assert(sourceShape.size() == readShape.size() && "expected same ranks.");
+  auto maskType = VectorType::get(readShape, builder.getI1Type());
   auto vectorType = VectorType::get(readShape, padValue.getType());
+  assert(padValue.getType() == sourceShapedType.getElementType() &&
+         "expected same pad element type to match source element type");
   int64_t readRank = readShape.size();
-  auto zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-  auto transferReadOp = rewriter.create<vector::TransferReadOp>(
+  auto zero = builder.create<arith::ConstantIndexOp>(loc, 0);
+  SmallVector<bool> inBoundsVal(readRank, true);
+  if (!useInBoundsInsteadOfMasking) {
+    // Update the inBounds attribute.
+    for (unsigned i = 0; i < readRank; i++)
+      inBoundsVal[i] = (sourceShape[i] == readShape[i]) &&
+                       !ShapedType::isDynamic(sourceShape[i]);
+  }
+  auto transferReadOp = builder.create<vector::TransferReadOp>(
       loc,
       /*vectorType=*/vectorType,
       /*source=*/source,
       /*indices=*/SmallVector<Value>(readRank, zero),
       /*padding=*/padValue,
-      /*inBounds=*/SmallVector<bool>(readRank, true));
-  if (llvm::equal(readShape, sourceShape)) {
+      /*inBounds=*/inBoundsVal);
+
+  if (llvm::equal(readShape, sourceShape) || !useInBoundsInsteadOfMasking)
     return transferReadOp;
-  }
   SmallVector<OpFoldResult> mixedSourceDims =
-      tensor::getMixedSizes(rewriter, loc, source);
+      tensor::getMixedSizes(builder, loc, source);
   Value mask =
-      rewriter.create<vector::CreateMaskOp>(loc, maskType, mixedSourceDims);
-  return mlir::vector::maskOperation(rewriter, transferReadOp, mask)
+      builder.create<vector::CreateMaskOp>(loc, maskType, mixedSourceDims);
+  return mlir::vector::maskOperation(builder, transferReadOp, mask)
       ->getResult(0);
 }
 
@@ -512,13 +532,17 @@ struct InsertElemContinuationValues {
 
 /// Insert a new, bigger element than the currently smallest element added in
 /// output of the function.
+/// This code is executed after a determination is made that an element from
+/// the input will be included in the output. If no need to include an element
+/// in the output, this code is never executed, thus making the building of the
+/// output as close as possible to O(n).
 ///
 /// 1. Find the position of the element that needs to be inserted.
 ///    There is no support for returning in the middle of a loop,
-///    so a iter_arg flag is set to annotate that when the insertion
+///    so an iter_arg flag is set to annotate that the insertion
 ///    index is found.
 /// 2. If the insertion index is equal of the dimension of output,
-///    no addition is needed.
+///    no addition of elements is needed - just shift and replace.
 /// 3. If the insertion index is equal of the elements added to the output,
 ///    No need to shift, just add the element at the end and expand the
 ///    addedElems.
@@ -534,6 +558,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
   newOperands.push_back(b.create<arith::ConstantIndexOp>(loc, 0));
 
   scf::YieldOp scfYieldOp;
+  // The following loop finds the insertion index of the input element in
+  // thr output.
   scf::ForOp findSmaller = b.create<scf::ForOp>(
       loc, b.create<arith::ConstantIndexOp>(loc, 0), continuation.addedElems,
       b.create<arith::ConstantIndexOp>(loc, 1), newOperands,
@@ -550,7 +576,17 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
     Value notFoundSmaller = findSmaller.getRegionIterArgs()[0];
     // The index where the element needs to be inserted.
     Value insertionIndex = findSmaller.getRegionIterArgs()[1];
+    // Test the 0th iter_arg to decide if the insertion index in the output
+    // is found.
     // If we have found the insertionIndex in previous iterations, do nothing.
+    // The insertion index is the index of the first element in out0 that is
+    // smaller than the current element to be inserted, or the addedElems
+    // (elements added to the output), if not the whole output is filled,
+    // and there is no element smaller that the incoming element.
+    // TODO: lubol this scf::If is needed because scf::ForOp has no support
+    //       for break in a middle of a loop. The code will be simplified
+    //       quite a bit (and be faster) when such support is added.
+    //       Remove it when such support is added.
     Value cmpElemOp = b.create<arith::CmpIOp>(
         loc, mlir::arith::CmpIPredicate::eq, notFoundSmaller,
         b.create<arith::ConstantIntOp>(loc, 1, 1));
@@ -587,7 +623,9 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
           auto ifToAdd = b.create<scf::IfOp>(
               loc, cmpElemOp,
               [&](OpBuilder &b, Location loc) {
-                // Get the value of the current induction variable.
+                // Get the value of the current induction variable,
+                // which is the index where the new element needs to
+                // be inserted in the output.
                 Value insertionIndex = b.create<arith::AddIOp>(
                     loc, findSmaller.getInductionVar(),
                     b.create<arith::ConstantIndexOp>(loc, 0));
@@ -600,6 +638,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
               },
               [&](OpBuilder &b, Location loc) {
                 // The index was not found yet.
+                // Continue the iteration, not modifying the
+                // returns of the if.
                 Value notFoundSmIn = notFoundSm;
                 Value insertionIndIn = insertionInd;
                 SmallVector<Value> newOperands;
@@ -609,6 +649,9 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
               });
 
           SmallVector<Value> newOperands;
+          // Return the current insertion index and found status (the one we
+          // found in the if or the one that came in the if,
+          // but was not updated).
           newOperands.push_back(ifToAdd.getResult(0));
           newOperands.push_back(ifToAdd.getResult(1));
           b.create<scf::YieldOp>(loc, newOperands);
@@ -616,6 +659,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
         [&](OpBuilder &b, Location loc) {
           // The index was already found yet.
           // Just return. No need to update anything.
+          // Note: We still need to iterate to the end of the loop since
+          // there is no break out of scf::ForOp.
           SmallVector<Value> newOperands;
           Value notFoundSm = notFoundSmaller;
           Value insertionInd = insertionIndex;
@@ -628,6 +673,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
     insertionIndex = ifFoundIndex.getResult(1);
 
     SmallVector<Value> newOperands;
+    // The for loop returns if insertion index was found
+    // and the insertion index value.
     newOperands.push_back(notFoundSmaller);
     newOperands.push_back(insertionIndex);
     b.create<scf::YieldOp>(loc, newOperands);
@@ -647,7 +694,7 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
       [&](OpBuilder &b, Location loc) {
         // if
         // Element doesn't need to be added to the output.
-        // It is smaller than the last element in the out dimension.
+        // It is smaller than the last element in the out tensor.
         SmallVector<Value> newOperands;
         newOperands.push_back(continuation.out0);
         newOperands.push_back(continuation.out1);
@@ -690,12 +737,14 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
               b.create<scf::YieldOp>(loc, newOperandsIf);
             },
             [&](OpBuilder &b, Location loc) {
+              // The element needs to be inserted in the output tensor.
+              // The elements in the output need to be shifted and the
+              // new element to be set at the right index.
               Value outValsElse = continuation.out0;
               Value outIndsElse = continuation.out1;
-              ;
               Value smElemElse = continuation.smallestElem;
               Value addElemsElse = continuation.addedElems;
-              // Get the new end-index for moving the array.
+              // Get the new end-index for shiftin the outputarray.
               // It is one less the last index of an added element in the
               // output, because the move is done using a[i+1] = a[i] shifting.
               Value cmp = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
@@ -703,8 +752,9 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
               auto ifExpand = b.create<scf::IfOp>(
                   loc, cmp,
                   [&](OpBuilder &b, Location loc) {
-                    // if
-                    // No expansion. Shift elements out of the output.
+                    // if case
+                    // The the output is fully filled,
+                    // no expansion is needed. Shift elements out of the output.
                     Value addElems = addElemsElse;
                     auto one = b.create<arith::ConstantIndexOp>(loc, 1);
                     Value lastElemIndex =
@@ -715,7 +765,9 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
                   },
                   [&](OpBuilder &b, Location loc) {
                     // else
-                    // Expansion
+                    // Expansion is needed since the element is inserted
+                    // and the elements after are shifted to eventually
+                    // fill fully the output array (1-D tensor).
                     Value addElems = addElemsElse;
                     SmallVector<Value> newOperands;
                     newOperands.push_back(addElems);
@@ -744,6 +796,17 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
               newOperands.push_back(out2Repl);
               scf::YieldOp lastLoopOp;
               // Now shift the elements
+              // This loop shift elements.
+              // The logic is rather complicated because the scf::ForOp
+              // doesn't support negative step -
+              // https://mlir.llvm.org/docs/Dialects/SCFDialect/#scffor-scfforop
+              // The element values (for out0 and out1) that needs to be shifted
+              // to the next element are passed as iter_args and thus avoiding a
+              // temp var assignments.
+              //
+              // TODO: lubol remove the iter_args for the value that need to be
+              // shifted to the next element when scf::ForOp support for
+              // negative loop step is added.
               scf::ForOp shiftElemsLoop = b.create<scf::ForOp>(
                   loc, insertionIndex, lastElemIndex,
                   b.create<arith::ConstantIndexOp>(loc, 1), newOperands,
@@ -788,7 +851,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
 
               lastLoopOp.erase();
 
-              // Get the smellest element as the last added element.
+              // Get the smellest element as the last added element
+              // to return to the next iteration of the tile (1x16xf/i32) loop.
               smElemElse = b.create<tensor::ExtractOp>(
                   loc, shiftElemsLoop.getResult(0),
                   ValueRange{idx0, ifExpand.getResult(0)});
@@ -814,6 +878,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
               b.create<scf::YieldOp>(loc, newOperandsElse);
             });
 
+        // Propagate returns from nested loops and ifs to the
+        // output of the function.
         Value outValsAtEnd = ifAddAtEnd.getResult(0);
         Value outIndsAtEnd = ifAddAtEnd.getResult(1);
         Value smElemAtEnd = ifAddAtEnd.getResult(2);
@@ -826,6 +892,8 @@ insertElemInOutput(Location loc, OpBuilder b, Value elemToInsertIfNeeded,
         newOperands.push_back(addElemsAtEnd);
         b.create<scf::YieldOp>(loc, newOperands);
       });
+  // Build and return the continuation of the outer loop,
+  // after inserting the element.
   return InsertElemContinuationValues{
       ifAddElem.getResult(0), ifAddElem.getResult(1), ifAddElem.getResult(2),
       ifAddElem.getResult(3)};
@@ -867,6 +935,14 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
     rewriter.setInsertionPoint(scfInputLoop);
     // Create a new loop based on the old one with adding the necessary
     // iter_args.
+    // Note: The iter_args to the loop and all the high level scf::For
+    // and scf::If are always in the same format:
+    // 1. Value for the out0 tensor
+    // 2. Value for the out1 tensor
+    // 3. Value for the smallestElem (smallest element added to the out0 tensor)
+    // 4. Number of elements added to the out tensors.
+    // For the main loop there is another iter_arg:
+    // 2.5. an i1 value denoting wheter the smallestElem was initialized.
     if (failed(addIterArgs(rewriter, loc, scfInputLoop, outValElemType,
                            outIdxElemType)))
       return failure();
@@ -878,7 +954,8 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
     return failure();
   scf::ForOp newLoop = dyn_cast<scf::ForOp>(regParent);
   Value outputInitialized = newLoop.getRegionIterArgs()[2];
-  // The following if is used to initialize the out arrays.
+  // The following if is used to initialize the smallestElem value.
+  // It is done only once on the first iteration of the loop.
   // The outputs are the out0, out1, the smallest element added to the out0,
   // number of added elements.
   auto ifInitOut = rewriter.create<scf::IfOp>(
@@ -919,8 +996,25 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
       });
 
   Type inElemTy = topkOp.getInputType().getElementType();
+  TypedAttr minAttr;
+  if (auto intType = llvm::dyn_cast<IntegerType>(inElemTy)) {
+    minAttr = rewriter.getIntegerAttr(
+        intType, APInt::getSignedMinValue(intType.getWidth()));
+  } else if (auto floatType = llvm::dyn_cast<FloatType>(inElemTy)) {
+    auto minApFloat =
+        APFloat::getInf(llvm::cast<FloatType>(inElemTy).getFloatSemantics(),
+                        /*Negative=*/true);
+    minAttr = rewriter.getFloatAttr(inElemTy, minApFloat);
+  } else {
+    return failure();
+  }
+
+  Value padValue = rewriter.create<arith::ConstantOp>(loc, minAttr);
+  // TODO: lubol Remove when PR https://github.com/llvm/llvm-project/pull/89119
+  // is propagated and call the new mlir::vector::createReadOrMaskedRead utility
+  // function.
   Value inValsVec = createReadOrMaskedRead(rewriter, loc, topkOp.getInputs()[0],
-                                           inputVectorSizes, inElemTy);
+                                           inputVectorSizes, padValue, false);
   auto elemVecType = VectorType::get(inputVectorSizes, inElemTy);
   Value smallestMask = rewriter.create<vector::BroadcastOp>(
       loc, elemVecType, ifInitOut.getResult(2));
@@ -942,6 +1036,9 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
   Value cmpAddedElems =
       rewriter.create<arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::slt,
                                      ifInitOut.getResult(3), outNumElems);
+  // This scf::If checks to see if the output is fully full.
+  // If so, the mask we calculated is usable. If not, we should add as many
+  // elements as needed in oder to fully fill the output.
   auto ifFillMask = rewriter.create<scf::IfOp>(
       loc, cmpAddedElems,
       [&](OpBuilder &b, Location loc) {
@@ -959,21 +1056,29 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
         b.create<scf::YieldOp>(loc, operands);
       });
 
+  // Or the outs of the element compares to know if
+  // there are any elements at all that need to be inserted.
   auto vecCmpCond = rewriter.create<vector::MultiDimReductionOp>(
       loc, ifFillMask.getResult(0),
       rewriter.create<arith::ConstantIntOp>(loc, 0, 1), SmallVector<bool>{1, 1},
       vector::CombiningKind::OR);
 
+  // Check to see if any of the insertion logic needs to be triggered
+  // (do we need to insert any elemets from the corrent ones
+  // in the input vector).
   auto ifVecCmp = rewriter.create<scf::IfOp>(
       loc, vecCmpCond,
       [&](OpBuilder &b, Location loc) {
-        // There are bigger elemnets.
+        // There are bigger elemnets than the smallest added,
+        // so the insertion logic needs to be invoked.
         SmallVector<Value> maskProcessingLoopOps;
         maskProcessingLoopOps.push_back(ifInitOut.getResult(0));
         maskProcessingLoopOps.push_back(ifInitOut.getResult(1));
         maskProcessingLoopOps.push_back(ifInitOut.getResult(2));
         maskProcessingLoopOps.push_back(ifInitOut.getResult(3));
         scf::YieldOp forYield;
+        // A loop that processes the masks in the vector register.
+        // An mask of 1 denotes an element that needs to be inserted.
         scf::ForOp maskProcessingLoop = b.create<scf::ForOp>(
             loc, b.create<arith::ConstantIndexOp>(loc, 0), newLoop.getStep(),
             b.create<arith::ConstantIndexOp>(loc, 1), maskProcessingLoopOps,
@@ -1008,20 +1113,22 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
           // operands
           Value aCast = rewriter.create<vector::ShapeCastOp>(
               loc, newVType, ifFillMask.getResult(0));
+          // Ecxtarct from the input vector the element
+          // that needs to be inserted.
           auto elemMask = rewriter.create<vector::ExtractElementOp>(
               loc, aCast, maskProcessingLoop.getInductionVar());
-          Value goToOut = rewriter.create<arith::CmpIOp>(
-              loc, arith::CmpIPredicate::eq, elemMask,
-              rewriter.create<arith::ConstantIntOp>(loc, 1, 1));
           auto insertElemIfNeeded = rewriter.create<scf::IfOp>(
-              loc, goToOut,
+              loc, elemMask,
               [&](OpBuilder &bIn2, Location loc) {
-                inValsVec.print(llvm::errs());
+                // We need to insert the element in the output.
                 auto sourceVectorType =
                     dyn_cast<VectorType>(inValsVec.getType());
                 if (!sourceVectorType)
                   expectedRanksAndDims = false;
                 // The type here is always in the form 1x16xf/i32
+                // The ExtractElementOp (or ExtractOp) of vector doesn't
+                // support the unit dim types, so the first dim needs to
+                // be dropped.
                 if (sourceVectorType.getRank() != 2)
                   expectedRanksAndDims = false;
                 bool hasLeadingDimUnitFixed =
@@ -1038,9 +1145,14 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
                 auto elemToInsertIfNeeded =
                     bIn2.create<vector::ExtractElementOp>(
                         loc, aCast, maskProcessingLoop.getInductionVar());
+                // Add the indexes of the outer (tile) loop and the vector
+                // element loop to get the index of the
+                // element we are inserting.
                 Value elemIndex = bIn2.create<arith::AddIOp>(
                     loc, maskProcessingLoop.getInductionVar(),
                     newLoop.getInductionVar());
+                // Call the function that generates the element insertion
+                // code in the output.
                 InsertElemContinuationValues cont = insertElemInOutput(
                     loc, bIn2, elemToInsertIfNeeded, elemIndex, outNumElems,
                     InsertElemContinuationValues{
@@ -1057,6 +1169,8 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
               },
               [&](OpBuilder &bIn3, Location loc) {
                 // else No need to insert anything.
+                // Just return the tensor and the smallestElem,
+                // and elemsAdded without changes.
                 SmallVector<Value> operands;
                 operands.push_back(maskProcessingLoop.getRegionIterArgs()[0]);
                 operands.push_back(maskProcessingLoop.getRegionIterArgs()[1]);
@@ -1064,6 +1178,7 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
                 operands.push_back(maskProcessingLoop.getRegionIterArgs()[3]);
                 bIn3.create<scf::YieldOp>(loc, operands);
               });
+          // Propagate outputs of ifs/fors.
           SmallVector<Value> newOperands;
           newOperands.push_back(insertElemIfNeeded.getResult(0));
           newOperands.push_back(insertElemIfNeeded.getResult(1));
@@ -1094,7 +1209,7 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
   if (!expectedRanksAndDims)
     return failure();
 
-  // Create a new yield op for the loop.
+  // Create a new yield op for the top (tiling) loop.
   {
     OpBuilder::InsertionGuard g(rewriter);
     scf::YieldOp yieldOp =
