@@ -49,7 +49,7 @@ iree_check_single_backend_test_suite(
     name = "check_cuda-topk-split-reduction",
     srcs = [
         "top-k.mlir",
-    ]
+    ],
     compiler_flags = ["--iree-flow-topk-split-reduction=2"],
     driver = "cuda",
     tags = [

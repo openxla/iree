@@ -373,7 +373,7 @@ func.func @generic_unpack_infer_vector_size(%arg0: tensor<?x?x16x16xf32>, %arg1:
 // The GenericVectorize pass should not make changes since the dim 0 size
 // is not multiple of 16.
 // Make sure that the topk function is not overritten.
-func.func @topk_1x35xf32() attributes {translation_info = #iree_codegen.translation_info<CPULinalgExtTileAndVectorize>} {
+func.func @topk_1x35xf32() {
   %c16 = arith.constant 16 : index
   %c35 = arith.constant 35 : index
   %c0 = arith.constant 0 : index
@@ -403,7 +403,7 @@ func.func @topk_1x35xf32() attributes {translation_info = #iree_codegen.translat
   return
 }
 
-// CHECK-LABEL func.func @topk_1x35xf32() attributes {translation_info = #iree_codegen.translation_info<CPULinalgExtTileAndVectorize>} {
+// CHECK-LABEL func.func @topk_1x35xf32()
 // CHECK         scf.for
 // CHECK         iree_linalg_ext.topk
 
@@ -412,7 +412,7 @@ func.func @topk_1x35xf32() attributes {translation_info = #iree_codegen.translat
 // Test for topk 1x32xf2 input.
 // The GenericVectorize pass should rewrite the function with vector/scalar code
 // since the dim 0 size is multiple of 16.
-func.func @1x32xf32() attributes {translation_info = #iree_codegen.translation_info<CPULinalgExtTileAndVectorize>} {
+func.func @topk_1x32xf32() {
   %c16 = arith.constant 16 : index
   %c32 = arith.constant 32 : index
   %c0 = arith.constant 0 : index
@@ -441,11 +441,11 @@ func.func @1x32xf32() attributes {translation_info = #iree_codegen.translation_i
   return
 }
 
-// CHECK-LABEL func.func @topk_1x32xf32() attributes {translation_info = #iree_codegen.translation_info<CPULinalgExtTileAndVectorize>} {
+// CHECK-LABEL func.func @topk_1x32xf32()
+// CHECK-NOT:         iree_linalg_ext.topk
 // CHECK:             %true = arith.constant true
 // CHECK:             %cst = arith.constant 0.000000e+00 : f32
-// CHECK:             %c0_0 = arith.constant 0 : index
-
+// CHECK:             %[[c:.+]] = arith.constant 0 : index
 // CHECK:             scf.for
 // CHECK:               scf.if
 // CHECK:               [[VR:.+]] = vector.transfer_read
