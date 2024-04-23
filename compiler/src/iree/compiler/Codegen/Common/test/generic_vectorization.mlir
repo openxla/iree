@@ -402,7 +402,6 @@ func.func @topk_1x35xf32() {
   flow.dispatch.tensor.store %6#1, %2, offsets = [0, 0], sizes = [1, 35], strides = [1, 1] : tensor<1x35xi32> -> !flow.dispatch.tensor<readwrite:tensor<1x35xi32>>
   return
 }
-
 // CHECK-LABEL func.func @topk_1x35xf32()
 // CHECK         scf.for
 // CHECK         iree_linalg_ext.topk
@@ -440,7 +439,6 @@ func.func @topk_1x32xf32() {
   flow.dispatch.tensor.store %6#1, %2, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : tensor<1x32xi32> -> !flow.dispatch.tensor<readwrite:tensor<1x32xi32>>
   return
 }
-
 // CHECK-LABEL func.func @topk_1x32xf32()
 // CHECK-NOT:         iree_linalg_ext.topk
 // CHECK:             %true = arith.constant true
