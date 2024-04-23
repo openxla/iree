@@ -408,8 +408,8 @@ func.func @topk_1x32xf32() {
 // CHECK-TOPK:             %[[C0:.+]] = arith.constant 0 : index
 // CHECK-TOPK:             scf.for
 // CHECK-TOPK:               scf.if
-// CHECK-TOPK:               [[VR:.+]] = vector.transfer_read
-// CHECK-TOPK:               [[BR:.+]] = vector.broadcast
+// CHECK-TOPK:               %[[VR:.+]] = vector.transfer_read
+// CHECK-TOPK:               %[[BR:.+]] = vector.broadcast
 // CHECK-TOPK:               arith.cmpf ogt, %[[VR]], %[[BR]]
 // CHECK-TOPK:               scf.if
 // CHECK-TOPK:               vector.multi_reduction <or>
