@@ -369,7 +369,7 @@ func.func @generic_unpack_infer_vector_size(%arg0: tensor<?x?x16x16xf32>, %arg1:
 // CHECK-MASK:           %[[EXP:.+]] = math.exp %[[GENERIC_SRC]]
 // CHECK-MASK:           vector.transfer_write %[[EXP]]{{.+}}, %[[GENERIC_MASK]]
 
-//-----
+// -----
 
 // Test for topk 1x35xf2 input.
 // The GenericVectorize pass should not make changes since the dim 0 size
@@ -406,9 +406,9 @@ func.func @topk_1x35xf32() {
 }
 // CHECK-NO-TOPK-LABEL:   func.func @topk_1x35xf32()
 // CHECK-NO-TOPK:           scf.for
-// CHECK-NO-TOPK:           iree_linalg_ext.topk
+// CHECK-NO-TOPK:             iree_linalg_ext.topk
 
-//-----
+// -----
 
 // Test for topk 1x32xf2 input.
 // The GenericVectorize pass should rewrite the function with vector/scalar code
