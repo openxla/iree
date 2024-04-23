@@ -1,6 +1,8 @@
 // RUN: iree-opt --pass-pipeline="builtin.module(func.func(iree-codegen-generic-vectorization))" --split-input-file %s | FileCheck %s
 // RUN: iree-opt --pass-pipeline="builtin.module(func.func(iree-codegen-generic-vectorization{enable-vector-masking=true}))" --split-input-file %s | FileCheck %s -check-prefix=CHECK-MASK
 // RUN: iree-opt --pass-pipeline="builtin.module(func.func(iree-codegen-generic-vectorization{fold-cast-into-contract=true}))" --split-input-file %s | FileCheck %s -check-prefix=CHECK-FOLD
+// RUN: iree-opt --pass-pipeline="builtin.module(func.func(iree-codegen-generic-vectorization))" --iree-llvmcpu-vectorize-topk=false --split-input-file %s | FileCheck %s -check-prefix=CHECK-NO-TOPK
+// RUN: iree-opt --pass-pipeline="builtin.module(func.func(iree-codegen-generic-vectorization))" --iree-llvmcpu-vectorize-topk=true --split-input-file %s | FileCheck %s -check-prefix=CHECK-TOPK
 
 func.func @matmul(%lhs: tensor<3x4xf16>, %rhs: tensor<4x5xf16>, %acc: tensor<3x5xf32>) -> tensor<3x5xf32> {
   %result = linalg.matmul ins(%lhs, %rhs: tensor<3x4xf16>, tensor<4x5xf16>) outs(%acc: tensor<3x5xf32>) -> tensor<3x5xf32>
@@ -402,9 +404,9 @@ func.func @topk_1x35xf32() {
   flow.dispatch.tensor.store %6#1, %2, offsets = [0, 0], sizes = [1, 35], strides = [1, 1] : tensor<1x35xi32> -> !flow.dispatch.tensor<readwrite:tensor<1x35xi32>>
   return
 }
-// CHECK-LABEL func.func @topk_1x35xf32()
-// CHECK         scf.for
-// CHECK         iree_linalg_ext.topk
+// CHECK-NO-TOPK-LABEL func.func @topk_1x35xf32()
+// CHECK-NO-TOPK         scf.for
+// CHECK-NO-TOPK         iree_linalg_ext.topk
 
 //-----
 
@@ -439,45 +441,45 @@ func.func @topk_1x32xf32() {
   flow.dispatch.tensor.store %6#1, %2, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : tensor<1x32xi32> -> !flow.dispatch.tensor<readwrite:tensor<1x32xi32>>
   return
 }
-// CHECK-LABEL func.func @topk_1x32xf32()
-// CHECK-NOT:         iree_linalg_ext.topk
-// CHECK:             %true = arith.constant true
-// CHECK:             %cst = arith.constant 0.000000e+00 : f32
-// CHECK:             %[[c:.+]] = arith.constant 0 : index
-// CHECK:             scf.for
-// CHECK:               scf.if
-// CHECK:               [[VR:.+]] = vector.transfer_read
-// CHECK:               [[BR:.+]] = vector.broadcast
-// CHECK:               arith.cmpf ogt, %[[VR]], %[[BR]]
-// CHECK:               scf.if
-// CHECK:               vector.multi_reduction <or>
-// CHECK:               scf.if
-// CHECK:                 scf.for
-// CHECK:                   vector.shape_cast
-// CHECK:                   vector.extractelement
-// CHECK:                       scf.if
-// CHECK:                         vector.shape_cast
-// CHECK:                         vector.extractelement
-// CHECK:                         arith.addi
-// CHECK:                         scf.for
-// CHECK:                           arith.cmpi eq
-// CHECK:                           scf.if
-// CHECK:                             tensor.extract
-// CHECK:                             arith.cmpf olt
-// CHECK:                             arith.cmpi eq
-// CHECK:                             scf.if
-// CHECK:                               arith.addi
-// CHECK:                         scf.if
-// CHECK:                           scf.if
-// CHECK:                             tensor.insert
-// CHECK:                             tensor.insert
-// CHECK:                           arith.cmpi eq
-// CHECK:                           scf.if
-// CHECK:                             arith.subi
-// CHECK:                           tensor.extract
-// CHECK:                           tensor.extract
-// CHECK:                           scf.for
-// CHECK:                             tensor.extract
-// CHECK:                             tensor.extract
-// CHECK:                             tensor.insert
-// CHECK:                             tensor.insert
+// CHECK-TOPK-LABEL func.func @topk_1x32xf32()
+// CHECK-TOPK-NOT:         iree_linalg_ext.topk
+// CHECK-TOPK:             %true = arith.constant true
+// CHECK-TOPK:             %cst = arith.constant 0.000000e+00 : f32
+// CHECK-TOPK:             %[[C0:.+]] = arith.constant 0 : index
+// CHECK-TOPK:             scf.for
+// CHECK-TOPK:               scf.if
+// CHECK-TOPK:               [[VR:.+]] = vector.transfer_read
+// CHECK-TOPK:               [[BR:.+]] = vector.broadcast
+// CHECK-TOPK:               arith.cmpf ogt, %[[VR]], %[[BR]]
+// CHECK-TOPK:               scf.if
+// CHECK-TOPK:               vector.multi_reduction <or>
+// CHECK-TOPK:               scf.if
+// CHECK-TOPK:                 scf.for
+// CHECK-TOPK:                   vector.shape_cast
+// CHECK-TOPK:                   vector.extractelement
+// CHECK-TOPK:                       scf.if
+// CHECK-TOPK:                         vector.shape_cast
+// CHECK-TOPK:                         vector.extractelement
+// CHECK-TOPK:                         arith.addi
+// CHECK-TOPK:                         scf.for
+// CHECK-TOPK:                           arith.cmpi eq
+// CHECK-TOPK:                           scf.if
+// CHECK-TOPK:                             tensor.extract
+// CHECK-TOPK:                             arith.cmpf olt
+// CHECK-TOPK:                             arith.cmpi eq
+// CHECK-TOPK:                             scf.if
+// CHECK-TOPK:                               arith.addi
+// CHECK-TOPK:                         scf.if
+// CHECK-TOPK:                           scf.if
+// CHECK-TOPK:                             tensor.insert
+// CHECK-TOPK:                             tensor.insert
+// CHECK-TOPK:                           arith.cmpi eq
+// CHECK-TOPK:                           scf.if
+// CHECK-TOPK:                             arith.subi
+// CHECK-TOPK:                           tensor.extract
+// CHECK-TOPK:                           tensor.extract
+// CHECK-TOPK:                           scf.for
+// CHECK-TOPK:                             tensor.extract
+// CHECK-TOPK:                             tensor.extract
+// CHECK-TOPK:                             tensor.insert
+// CHECK-TOPK:                             tensor.insert
