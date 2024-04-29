@@ -89,7 +89,7 @@ struct LLVMCPUVectorLoweringPassOptions {
 };
 
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
-createLLVMCPUDropVectorUnitDimsPass();
+createLLVMCPUOptimizeVectorShapesPass();
 
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createLLVMCPUVirtualVectorLoweringPass(std::string splitVectorTransfersTo = "");
