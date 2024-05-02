@@ -133,7 +133,7 @@ module attributes { transform.with_named_sequence } {
     // ===========================================================================
     %func_2 = transform.structured.match ops{["func.func"]} in %variant_op : (!transform.any_op) -> !transform.any_op
     transform.apply_patterns to %func_2 {
-      transform.apply_patterns.iree.fold_arith_ext_into_contraction
+      transform.apply_patterns.vector.fold_arith_extension
     } : !transform.any_op
 
     // Step 6. Post-bufferization vector distribution
@@ -170,12 +170,12 @@ module attributes { transform.with_named_sequence } {
     transform.iree.set_contraction_layout_attributes %contract2, %layout16x16x16 : !transform.any_op, !transform.any_param
 
     %distribute_func = transform.structured.match ops{["func.func"]} in %variant_op : (!transform.any_op) -> !transform.any_op
-    transform.iree.amdgpu_distribute_vectors %distribute_func test_conversion : !transform.any_op
+    %distribute_func_2 = transform.iree.amdgpu_distribute_vectors %distribute_func test_conversion : (!transform.any_op) -> !transform.any_op
 
-    transform.apply_patterns to %distribute_func {
+    transform.apply_patterns to %distribute_func_2 {
       transform.apply_patterns.canonicalization
     } : !transform.any_op
-    transform.apply_cse to %distribute_func : !transform.any_op
+    transform.apply_cse to %distribute_func_2 : !transform.any_op
 
     // Distribute shared memory copies
     // ==========================================

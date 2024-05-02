@@ -8,6 +8,7 @@
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenDialect.h"
 #include "iree/compiler/Codegen/SPIRV/Passes.h"
 #include "iree/compiler/Codegen/WGSL/Passes.h"
+#include "iree/compiler/Dialect/Flow/IR/FlowDialect.h"
 #include "iree/compiler/Dialect/HAL/Target/TargetRegistry.h"
 #include "iree/compiler/Dialect/HAL/Transforms/Passes.h"
 #include "iree/compiler/PluginAPI/Client.h"
@@ -122,22 +123,14 @@ public:
                     spirv::SPIRVDialect, gpu::GPUDialect>();
   }
 
-  void buildConfigurationPassPipeline(IREE::HAL::ExecutableVariantOp variantOp,
-                                      OpPassManager &passManager) override {
-    // For now we disable configuration if the variant has external object
-    // files.
-    if (variantOp.isExternal())
-      return;
-
+  void
+  buildConfigurationPassPipeline(IREE::HAL::ExecutableTargetAttr targetAttr,
+                                 OpPassManager &passManager) override {
     buildSPIRVCodegenConfigurationPassPipeline(passManager);
   }
 
-  void buildTranslationPassPipeline(IREE::HAL::ExecutableVariantOp variantOp,
+  void buildTranslationPassPipeline(IREE::HAL::ExecutableTargetAttr targetAttr,
                                     OpPassManager &passManager) override {
-    // For now we disable translation if the variant has external object files.
-    if (variantOp.isExternal())
-      return;
-
     // WebGPU does not support push constants (yet?), so replace loads from
     // push constants with loads from uniform buffers.
     // The corresponding runtime code must perform similar emulation, based

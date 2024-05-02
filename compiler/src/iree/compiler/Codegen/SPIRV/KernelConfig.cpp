@@ -8,10 +8,12 @@
 
 #include "iree/compiler/Codegen/Common/GPU/GPUHeuristics.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenAttrs.h"
+#include "iree/compiler/Codegen/Interfaces/PartitionableLoopsInterface.h"
 #include "iree/compiler/Codegen/SPIRV/Utils.h"
 #include "iree/compiler/Codegen/TransformStrategies/GPU/Strategies.h"
 #include "iree/compiler/Codegen/Utils/GPUUtils.h"
 #include "iree/compiler/Codegen/Utils/LinalgOpInfo.h"
+#include "iree/compiler/Codegen/Utils/Utils.h"
 #include "iree/compiler/Dialect/Flow/IR/FlowOps.h"
 #include "iree/compiler/Dialect/LinalgExt/IR/LinalgExtOps.h"
 #include "iree/compiler/Dialect/Util/IR/UtilTypes.h"
@@ -28,7 +30,6 @@
 #include "mlir/Dialect/SPIRV/IR/SPIRVEnums.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/TypeUtilities.h"
@@ -1043,7 +1044,7 @@ static LogicalResult setWinogradOpConfig(spirv::ResourceLimitsAttr limits,
   // sizes found in the StableDiffusion model.
   auto pipeline = CodeGenPipeline::SPIRVWinogradVectorize;
   std::array<int64_t, 3> workgroupSize = {32, 4, 4};
-  TileSizesListType tileSizes = {{1, 32}};
+  TileSizesListType tileSizes = {{1, 0, 0, 32}, {1, 1, 1, 1}, {0, 0, 0, 0}};
   return setOpConfigAndEntryPointFnTranslation(
       op->getParentOfType<mlir::FunctionOpInterface>(), op, tileSizes, pipeline,
       workgroupSize);

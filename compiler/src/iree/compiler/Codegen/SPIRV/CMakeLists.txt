@@ -57,7 +57,6 @@ iree_cc_library(
     "Passes.cpp"
     "SPIRVAnnotateWinogradLoops.cpp"
     "SPIRVBreakDownLargeVector.cpp"
-    "SPIRVDistribute.cpp"
     "SPIRVEmulateI64.cpp"
     "SPIRVEraseStorageBufferStaticShape.cpp"
     "SPIRVFinalVectorLowering.cpp"
@@ -68,7 +67,6 @@ iree_cc_library(
     "SPIRVMapMemRefStorageClass.cpp"
     "SPIRVMaterializeExecutableConditions.cpp"
     "SPIRVSelectLoweringStrategy.cpp"
-    "SPIRVTile.cpp"
     "SPIRVTileAndDistribute.cpp"
     "SPIRVTileAndPromote.cpp"
     "SPIRVTileAndVectorizeToCooperativeOps.cpp"
@@ -141,6 +139,7 @@ iree_cc_library(
     iree::compiler::Codegen::Common::GPU::GPUHeuristics
     iree::compiler::Codegen::Common::TransformDialectInterpreterPass
     iree::compiler::Codegen::Dialect::Codegen::IR::IREECodegenDialect
+    iree::compiler::Codegen::Interfaces::PartitionableLoopsInterface
     iree::compiler::Codegen::TransformStrategies::GPU
     iree::compiler::Codegen::Transforms
     iree::compiler::Codegen::Utils

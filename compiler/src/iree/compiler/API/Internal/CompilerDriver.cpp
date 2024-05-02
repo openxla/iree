@@ -345,15 +345,13 @@ struct Session {
         pluginActivationStatus = pluginSession.activatePlugins(&context);
 
         // Initialize target registry, bootstrapping with the static globals.
-        // TODO(15468): remove the static registration mechanism so the merge
-        // from global is not required.
         targetRegistry.mergeFrom(IREE::HAL::TargetRegistry::getGlobal());
-        IREE::HAL::TargetBackendList pluginTargetBackendList;
-        pluginSession.populateHALTargetBackends(pluginTargetBackendList);
-        targetRegistry.mergeFrom(pluginTargetBackendList);
         IREE::HAL::TargetDeviceList pluginTargetDeviceList;
         pluginSession.populateHALTargetDevices(pluginTargetDeviceList);
         targetRegistry.mergeFrom(pluginTargetDeviceList);
+        IREE::HAL::TargetBackendList pluginTargetBackendList;
+        pluginSession.populateHALTargetBackends(pluginTargetBackendList);
+        targetRegistry.mergeFrom(pluginTargetBackendList);
       }
     }
     return pluginActivationStatus;
@@ -1254,7 +1252,7 @@ void ireeCompilerSetupGlobalCL(int argc, const char **argv, const char *banner,
   globalInit->registerCommandLineOptions();
 
   llvm::setBugReportMsg(
-      "Please report issues to https://github.com/openxla/iree/issues and "
+      "Please report issues to https://github.com/iree-org/iree/issues and "
       "include the crash backtrace.\n");
   llvm::cl::SetVersionPrinter(llvmVersionPrinter);
 

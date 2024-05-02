@@ -179,12 +179,30 @@ util.func private @PropagateSplatsThroughSlices(%arg0: index) -> !stream.resourc
 
 // -----
 
+// Allow pattern because we can verify the target is safe to elide.
+
 // CHECK-LABEL: @FlattenFullFillToSplat
-util.func private @FlattenFullFillToSplat(%arg0: !stream.resource<*>, %arg1: index, %arg2: i32) -> !stream.resource<*> {
+util.func private @FlattenFullFillToSplat(%arg0: index, %arg1: i32) -> !stream.resource<*> {
   %c0 = arith.constant 0 : index
-  // CHECK: %[[T:.+]] = stream.async.splat %arg2 : i32 -> !stream.resource<*>{%arg1}
-  %0 = stream.async.fill %arg2, %arg0[%c0 to %arg1 for %arg1] : i32 -> %arg0 as !stream.resource<*>{%arg1}
+  %c123_i32 = arith.constant 123 : i32
+  %target = stream.async.splat %c123_i32 : i32 -> !stream.resource<*>{%arg0}
+  // CHECK: %[[T:.+]] = stream.async.splat %arg1 : i32 -> !stream.resource<*>{%arg0}
+  %0 = stream.async.fill %arg1, %target[%c0 to %arg0 for %arg0] : i32 -> %target as !stream.resource<*>{%arg0}
   // CHECK: util.return %[[T]]
+  util.return %0 : !stream.resource<*>
+}
+
+// -----
+
+// The target is tied and we cannot avoid the fill.
+
+// CHECK-LABEL: @FlattenFullFillToSplatUnsafe
+util.func private @FlattenFullFillToSplatUnsafe(%arg0: index, %arg1: i32, %arg2: !hal.buffer_view) -> !stream.resource<*> {
+  %c0 = arith.constant 0 : index
+  // CHECK: stream.tensor.import
+  %target = stream.tensor.import %arg2 : !hal.buffer_view -> tensor<8xi32> in !stream.resource<*>{%arg0}
+  // CHECK: stream.async.fill
+  %0 = stream.async.fill %arg1, %target[%c0 to %arg0 for %arg0] : i32 -> %target as !stream.resource<*>{%arg0}
   util.return %0 : !stream.resource<*>
 }
 
@@ -241,13 +259,31 @@ util.func private @CoalesceAdjacentFills(%arg0: !stream.resource<*>, %arg1: inde
 
 // -----
 
-// CHECK-LABEL: @FoldAsyncUpdateOp
-util.func private @FoldAsyncUpdateOp(%arg0: !stream.resource<*>, %arg1: !stream.resource<*>, %arg2: index) -> !stream.resource<*> {
+// If we can't analyze the resources we can't fold as the update may be required
+// to preserve an in-place update of an external resource.
+
+// CHECK-LABEL: @DontFoldNonLocalAsyncUpdateOp
+util.func private @DontFoldNonLocalAsyncUpdateOp(%arg0: !stream.resource<*>, %arg1: !stream.resource<*>, %arg2: index) -> !stream.resource<*> {
   %c0 = arith.constant 0 : index
-  // CHECK-NOT: stream.async.update
+  // CHECK: stream.async.update
   %0 = stream.async.update %arg1, %arg0[%c0 to %arg2] : !stream.resource<*>{%arg2} -> %arg0 as !stream.resource<*>{%arg2}
-  // CHECK: util.return %arg1
   util.return %0 : !stream.resource<*>
+}
+
+// -----
+
+// We can only fold when we prove that the target has value semantics.
+
+// CHECK-LABEL: @FoldLocalAsyncUpdateOp
+util.func private @FoldLocalAsyncUpdateOp(%arg0: !stream.resource<*>, %arg1: index) -> !stream.resource<*> {
+  %c0 = arith.constant 0 : index
+  %c123_i32 = arith.constant 123 : i32
+  // CHECK-NOT: stream.async.splat
+  %splat = stream.async.splat %c123_i32 : i32 -> !stream.resource<*>{%arg1}
+  // CHECK-NOT: stream.async.update
+  %update = stream.async.update %arg0, %splat[%c0 to %arg1] : !stream.resource<*>{%arg1} -> %result as !stream.resource<*>{%arg1}
+  // CHECK: util.return %arg0
+  util.return %update : !stream.resource<*>
 }
 
 // -----

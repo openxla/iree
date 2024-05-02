@@ -23,9 +23,10 @@ TilingConfig::TilingConfig(IREE::Codegen::LoweringConfigAttr lc)
   // scenarios:
   //   1. [[distribution]]
   //   2. [[distribution], [vector-common-parallel]]
-  //   3. [[distribution], [vector-common-parallel], [vector-reduction],
+  //   3. [[distribution], [vector-common-parallel], [vector-reduction]]
+  //   4. [[distribution], [vector-common-parallel], [vector-reduction],
   //       [vector-inner-parallel]]
-  //   4. [[distribution], [cache-parallel], [cache-reduction],
+  //   5. [[distribution], [cache-parallel], [cache-reduction],
   //       [vector-common-parallel], [vector-reduction],
   //       [vector-inner-parallel]]
   int numTileLevels = loweringConfig.getTilingLevels().size();
@@ -55,18 +56,16 @@ TilingConfig::TilingConfig(IREE::Codegen::LoweringConfigAttr lc)
 /// Returns the tiling level that contains the vector dim at `dimPos` (which is
 /// an index into the result of `getVectorTileSizes()`).
 std::optional<unsigned>
-TilingConfig::getTilingLevelForVectorDimPosition(unsigned dimPos) {
+TilingConfig::getTilingLevelForVectorDimPosition(unsigned dimPos) const {
   constexpr std::array vectorTilingLevels{VectorCommonParallelTiles,
                                           VectorReductionTiles,
                                           VectorInnerParallelTiles};
-  ArrayRef<TilingLevel> possibleLevels = vectorTilingLevels;
-  if (!hasVectorInnerParallelLevel())
-    possibleLevels = possibleLevels.drop_back();
   std::optional<unsigned> foundLevel;
   auto tilingLevels = loweringConfig.getTilingLevels();
-  for (TilingLevel level : possibleLevels) {
-    auto tilingLevelIndex = getActualLevel(level);
-    if (tilingLevels[tilingLevelIndex].getSizes()[dimPos] != 0) {
+  for (TilingLevel level : vectorTilingLevels) {
+    auto tilingLevelIndex = tilingLevelToActualLevelMap[level];
+    if (tilingLevelIndex != InvalidLevel &&
+        tilingLevels[tilingLevelIndex].getSizes()[dimPos] != 0) {
       assert(!foundLevel.has_value() &&
              "expected at most one tile size to be non-zero");
       foundLevel = tilingLevelIndex;
@@ -87,10 +86,6 @@ static std::pair<int64_t, bool> getTileSizeAtIndex(ArrayRef<int64_t> sizes,
 /// Returns the tile sizes of all the vector dimensions, including parallel
 /// and reduction dimensions.
 SizesAndScalableFlags TilingConfig::getVectorTileSizes() {
-  if (getNumTilingLevels() == 2) {
-    return getVectorCommonParallelSizes();
-  }
-
   unsigned numDims = getNumDimensions();
   SmallVector<int64_t> vectorSizes(numDims, 0);
   SmallVector<bool> scalableFlags(numDims, false);

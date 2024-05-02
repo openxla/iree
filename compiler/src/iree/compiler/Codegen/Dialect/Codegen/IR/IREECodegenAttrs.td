@@ -68,9 +68,10 @@ def SPIRV_WinogradVectorize
 
 def VMVX_Default : I32EnumAttrCase<"VMVXDefault", 300>;
 
-
 def Linalg_TransformDialectCodegen
     : I32EnumAttrCase<"TransformDialectCodegen", 1000>;
+def Custom
+    : I32EnumAttrCase<"Custom", 1001>;
 
 def None : I32EnumAttrCase<"None", 0xffff>;
 
@@ -99,7 +100,13 @@ def DispatchLoweringPassPipelineEnum : I32EnumAttr<
     VMVX_Default,
 
     // Transform dialect based codegen
-    Linalg_TransformDialectCodegen, None
+    Linalg_TransformDialectCodegen,
+
+    // For out of tree pass-pipelines
+    Custom,
+
+    // None to specify no in-built pipelines to use.
+    None
   ]> {
   let cppNamespace = "::mlir::iree_compiler::IREE::Codegen";
   // Don't generate a C++ class! We want to use the AttrDef
@@ -243,6 +250,10 @@ def IREECodegen_LoweringConfigAttr :
 
     // Returns the tile interchange for a level set for the op.
     SmallVector<int64_t> getTileInterchangeVals(unsigned level);
+
+    // Returns true if there are no tile interchange values (this means that
+    // interchange can be ignored).
+    bool isInterchangeEmpty();
 
     // Returns the native vector size to use.
     SmallVector<int64_t> getNativeVectorSizeVals() {

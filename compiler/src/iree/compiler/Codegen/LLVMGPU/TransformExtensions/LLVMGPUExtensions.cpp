@@ -1478,18 +1478,25 @@ transform_dialect::AMDGPUDistributeVectorsOp::applyToOne(
   populateGPUDistributionPatterns(patterns);
   populateGPUDistributionLayoutAttrPatterns(laneId, patterns);
   populateGPUReductionDistributionPatterns(patterns);
-  populateGPUDistributeNestedLayoutAttrPatterns(laneId, patterns);
+  // For testing we use subgroup size = 64.
+  populateGPUDistributeNestedLayoutAttrPatterns(patterns, laneId,
+                                                /*subgroupSize=*/64);
   populateAMDGPUDistributionPatterns(patterns);
   populateGPULayoutResolutionDistributionPatterns(patterns);
   if (failed(distributeVectorOps(target, patterns, options))) {
     return emitDefaultSilenceableFailure(target);
   }
+  // TODO: The consumption of the target handle is only required because the
+  // transform dialect interpreter will crash without it. This op should not
+  // need to invalidate the handle.
+  results.push_back(target);
   return DiagnosedSilenceableFailure::success();
 }
 
 void transform_dialect::AMDGPUDistributeVectorsOp::getEffects(
     SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
-  transform::onlyReadsHandle(getTarget(), effects);
+  transform::consumesHandle(getTarget(), effects);
+  transform::producesHandle(getResult(), effects);
   transform::modifiesPayload(effects);
 }
 

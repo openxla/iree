@@ -9,11 +9,22 @@
 
 #include <functional>
 
+#include "iree/compiler/Pipelines/Options.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 
 namespace mlir::iree_compiler::Preprocessing {
+
+// Enum to represent target op types to be padded.
+enum class PadTargetType {
+  // Convolution Ops.
+  ConvOp = 0,
+  // Contraction-like Ops.
+  ContractionOp = 1,
+  // All ops (both convolution and contraction ops).
+  All = 2,
+};
 
 //===----------------------------------------------------------------------===//
 // Register all Passes

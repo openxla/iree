@@ -104,6 +104,10 @@ std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>> createGPUDistribute();
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createGPUDistributeSharedMemoryCopy();
 
+/// Pass to distribute tiled loop nests to invocations.
+std::unique_ptr<InterfacePass<FunctionOpInterface>>
+createGPUDistributeScfForPass(bool useBlockDims = true);
+
 /// Apply multi-buffering transformation.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createGPUMultiBuffering(unsigned numBuffers = 5);
@@ -132,6 +136,9 @@ createGPUTensorTile(bool distributeToWarp = false);
 // Creates a pass to tile tensor (linalg) ops along reduction dimensions.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>
 createGPUTensorTileToSerialLoops();
+
+/// Pass to tile Linalg ops with tensor semantics to invocations.
+std::unique_ptr<InterfacePass<FunctionOpInterface>> createGPUTilePass();
 
 /// Tile reductions and generate serial loops around reductions.
 std::unique_ptr<InterfacePass<mlir::FunctionOpInterface>>

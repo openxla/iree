@@ -124,9 +124,9 @@ static TypedAttr tryNarrowPatternBits(TypedAttr patternAttr) {
   // Get the old pattern bitcast to an APInt. Splats are bitwise operations
   // and we don't care what the value originally was.
   APInt oldPattern;
-  if (auto floatAttr = patternAttr.dyn_cast<FloatAttr>()) {
+  if (auto floatAttr = dyn_cast<FloatAttr>(patternAttr)) {
     oldPattern = floatAttr.getValue().bitcastToAPInt();
-  } else if (auto intAttr = patternAttr.dyn_cast<IntegerAttr>()) {
+  } else if (auto intAttr = dyn_cast<IntegerAttr>(patternAttr)) {
     oldPattern = intAttr.getValue();
   } else {
     // Can't handle today.
@@ -1327,6 +1327,7 @@ void TensorFillOp::getCanonicalizationPatterns(RewritePatternSet &results,
 
 OpFoldResult TensorUpdateOp::fold(FoldAdaptor operands) {
   // TODO(benvanik): fold if target_size == update_size and affinity/lifetime.
+  // NOTE: must preserve in-place external storage ala AsyncUpdateOp.
   return {};
 }
 
@@ -1560,7 +1561,8 @@ namespace {
 
 // Turns fills that cover an entire target resource into splats.
 // This acts as a discard as it indicates we don't care about the previous
-// resource contents.
+// resource contents. Note that we only do this when we can locally prove that
+// it's safe to disassociate the result storage.
 //
 // Example:
 //  %0 = stream.async.fill %cst, %dst[%c0 to %dstsz for %dstsz] ... {%dstsz}
@@ -1570,13 +1572,20 @@ struct FlattenFullFillToSplat : public OpRewritePattern<AsyncFillOp> {
   using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(AsyncFillOp fillOp,
                                 PatternRewriter &rewriter) const override {
-    if (fillOp.getTargetLength() == fillOp.getTargetSize()) {
-      rewriter.replaceOpWithNewOp<IREE::Stream::AsyncSplatOp>(
-          fillOp, fillOp.getResult().getType(), fillOp.getValue(),
-          fillOp.getTargetSize(), fillOp.getAffinityAttr());
-      return success();
+    if (fillOp.getTargetLength() != fillOp.getTargetSize())
+      return failure();
+
+    auto targetOp = fillOp.getTarget().getDefiningOp();
+    if (!targetOp || IREE::Util::TiedOpInterface::findTiedBaseValue(
+                         fillOp.getTarget()) != fillOp.getTarget()) {
+      return rewriter.notifyMatchFailure(
+          fillOp, "unable to locally determine safety of eliding the target");
     }
-    return failure();
+
+    rewriter.replaceOpWithNewOp<IREE::Stream::AsyncSplatOp>(
+        fillOp, fillOp.getResult().getType(), fillOp.getValue(),
+        fillOp.getTargetSize(), fillOp.getAffinityAttr());
+    return success();
   }
 };
 
@@ -1699,12 +1708,36 @@ void AsyncFillOp::getCanonicalizationPatterns(RewritePatternSet &results,
 // stream.async.update
 //===----------------------------------------------------------------------===//
 
+// Returns true if |value| has known value semantics (it's produced locally
+// and is safe to drop mutations on if there are no observers).
+static bool hasValueSemantics(Value value) {
+  // Can't analyze function arguments (though we could add arg attrs to indicate
+  // value semantics).
+  auto *definingOp = value.getDefiningOp();
+  if (!definingOp)
+    return false;
+
+  // If produced by a tied op then see if the particular result is tied.
+  if (auto tiedOp = dyn_cast<IREE::Util::TiedOpInterface>(definingOp)) {
+    if (tiedOp.getTiedResultOperand(value))
+      return false;
+  }
+
+  // To be conservative we only allow stream dialect ops that produce the
+  // resource as we know they all indicate value semantics when non-tied - ops
+  // from other dialects may not.
+  if (!definingOp->hasTrait<OpTrait::IREE::Stream::AsyncPhaseOp>())
+    return false;
+
+  return true;
+}
+
 OpFoldResult AsyncUpdateOp::fold(FoldAdaptor operands) {
+  // If updating the entire target then just replace with the update.
+  // NOTE: we have to ensure the target is known to have value semantics as
+  // otherwise the update may be performing an update of an external resource.
   if (getUpdateSize() == getTargetSize() &&
-      getUpdate().getType() == getType()) {
-    // If updating the entire target then just replace with the update.
-    // Note that this breaks copy-on-write semantics but will be fixed up during
-    // canonicalization if needed.
+      getUpdate().getType() == getType() && hasValueSemantics(getTarget())) {
     return getUpdate();
   }
   return {};

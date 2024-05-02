@@ -80,10 +80,23 @@ def MakeSingleDispatchForFunctionPass :
 }
 
 def PadToIntrinsics :
-    Pass<"iree-preprocessing-pad-to-intrinsics", ""> {
+    InterfacePass<"iree-preprocessing-pad-to-intrinsics", "mlir::FunctionOpInterface"> {
   let summary = "Pad linalg ops such that we can use target's intrinsics.";
   let dependentDialects = [
     "mlir::linalg::LinalgDialect",
+  ];
+  let options = [
+      Option<"padTargetType", "pad-target-type", "Preprocessing::PadTargetType",
+             /*default=*/"Preprocessing::PadTargetType::All",
+             "Pad target-op type that is being specified.",
+             [{::llvm::cl::values(
+               clEnumValN(Preprocessing::PadTargetType::ConvOp, "conv",
+                "Pad convolution ops to intrinsics."),
+               clEnumValN(Preprocessing::PadTargetType::ContractionOp, "contraction",
+                "Pad contraction ops to intrinsics."),
+               clEnumValN(Preprocessing::PadTargetType::All, "all",
+                "Pad all ops to intrinsics.")
+              )}]>,
   ];
 }
 
@@ -94,6 +107,26 @@ def PadLinalgOpsPass :
     Option<"paddingSize", "pad-size", "int",
            /*default=*/"4",
            "Specify the padding size">,
+  ];
+  let dependentDialects = [
+    "mlir::linalg::LinalgDialect",
+  ];
+}
+
+def TransposeMatmulPass : Pass<"iree-preprocessing-transpose-matmul-pass"> {
+  let summary = "Convert Linalg matmul ops to transposed variants";
+  let options = [
+    Option<"input", "input", "PreprocessingOptions::TransposeMatmulInput",
+           /*default=*/"PreprocessingOptions::TransposeMatmulInput::None",
+           "Input to transpose, one of: 'none' (default), 'lhs', 'rhs'",
+           [{llvm::cl::values(
+              clEnumValN(PreprocessingOptions::TransposeMatmulInput::Lhs, "lhs",
+                         "Transpose LHS input matrix."),
+              clEnumValN(PreprocessingOptions::TransposeMatmulInput::Rhs, "rhs",
+                         "Transpose RHS input matrix."),
+              clEnumValN(PreprocessingOptions::TransposeMatmulInput::None, "none",
+                         "Transpose neither input (disable)."))
+           }]>
   ];
   let dependentDialects = [
     "mlir::linalg::LinalgDialect",

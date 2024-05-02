@@ -44,8 +44,8 @@ void InputDialectOptions::bindOptions(OptionsBinder &binder) {
 // messages, so we err on the side of being helpful and populating plugin
 // options here, even though it is a layering violation.
 #ifdef IREE_COMPILER_PLUGIN_HAVE_STATIC_INPUT_STABLEHLO
-          "  =stablehlo     - Legalize from StableHLO ops.\n"
-          "  =stablehlo_xla - Legalize from StableHLO ops (with XLA cleanup preprocessing).\n"
+          "  =stablehlo     - Legalize from StableHLO ops (including VHLO deserialization).\n"
+          "  =stablehlo_xla - Legalize from StableHLO ops (including VHLO deserialization and XLA de-tupling).\n"
 #endif // IREE_COMPILER_PLUGIN_HAVE_STATIC_INPUT_STABLEHLO
 #ifdef IREE_COMPILER_PLUGIN_HAVE_STATIC_INPUT_TOSA
           "  =tosa          - Legalize from TOSA ops.\n"
@@ -123,6 +123,12 @@ void GlobalOptimizationOptions::bindOptions(OptionsBinder &binder) {
       llvm::cl::desc(
           "Hoists the results of latent constant expressions into immutable "
           "global initializers for evaluation at program load."),
+      llvm::cl::cat(category));
+  binder.opt<int64_t>(
+      "iree-opt-const-expr-max-size-increase-threshold",
+      constExprMaxSizeIncreaseThreshold,
+      llvm::cl::desc("Maximum byte size increase allowed for constant expr "
+                     "hoisting policy to allow hoisting."),
       llvm::cl::cat(category));
   binder.opt<bool>(
       "iree-opt-numeric-precision-reduction", numericPrecisionReduction,
@@ -239,6 +245,17 @@ void PreprocessingOptions::bindOptions(OptionsBinder &binder) {
       llvm::cl::desc(
           "File name of a transform dialect spec to use for preprocessing"),
       llvm::cl::cat(category));
+
+  binder.opt<TransposeMatmulInput>(
+      "iree-preprocessing-transpose-matmul", preprocessingTransposeMatmulInput,
+      llvm::cl::desc("Convert Linalg matmul ops to transposed variants."),
+      llvm::cl::cat(category),
+      llvm::cl::values(clEnumValN(TransposeMatmulInput::Lhs, "lhs",
+                                  "Transpose LHS input matrix."),
+                       clEnumValN(TransposeMatmulInput::Rhs, "rhs",
+                                  "Transpose RHS input matrix."),
+                       clEnumValN(TransposeMatmulInput::None, "none",
+                                  "Transpose neither input (disable).")));
 }
 
 } // namespace mlir::iree_compiler

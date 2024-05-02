@@ -33,11 +33,6 @@ def SPIRVBreakDownLargeVector : InterfacePass<"iree-spirv-breakdown-large-vector
   let constructor = "mlir::iree_compiler::createSPIRVBreakDownLargeVectorPass()";
 }
 
-def SPIRVDistribute : InterfacePass<"iree-spirv-distribute", "mlir::FunctionOpInterface"> {
-  let summary = "Distribute tiled loop nests to invocations";
-  let constructor = "mlir::iree_compiler::createSPIRVDistributePass()";
-}
-
 def SPIRVEmulateI64 :
     InterfacePass<"iree-spirv-emulate-i64", "mlir::FunctionOpInterface"> {
   let summary = "Emulate 64-bit integer ops with 32-bit integer ops";
@@ -105,11 +100,6 @@ def SPIRVSelectLoweringStrategy :
                 "to SPIR-V";
   let constructor =
       "mlir::iree_compiler::createSPIRVSelectLoweringStrategyPass()";
-}
-
-def SPIRVTile : InterfacePass<"iree-spirv-tile", "mlir::FunctionOpInterface"> {
-  let summary = "Tile Linalg ops with tensor semantics to invocations";
-  let constructor = "mlir::iree_compiler::createSPIRVTilePass()";
 }
 
 def SPIRVTileAndDistribute : InterfacePass<"iree-spirv-tile-and-distribute", "mlir::FunctionOpInterface"> {

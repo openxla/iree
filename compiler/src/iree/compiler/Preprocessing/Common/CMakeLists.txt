@@ -34,9 +34,11 @@ iree_cc_library(
     "PadLinalgOps.cpp"
     "PadToIntrinsics.cpp"
     "Passes.cpp"
+    "TransposeMatmul.cpp"
   DEPS
     ::PassesIncGen
     LLVMSupport
+    MLIRAffineDialect
     MLIRArithDialect
     MLIRFuncDialect
     MLIRFunctionInterfaces
@@ -64,6 +66,7 @@ iree_cc_library(
     iree::compiler::Dialect::HAL::IR
     iree::compiler::Dialect::Stream::IR
     iree::compiler::Dialect::Util::IR
+    iree::compiler::Pipelines::Options
   PUBLIC
 )
 

@@ -30,6 +30,7 @@ namespace mlir::iree_compiler {
 
 using namespace IREE::LinalgExt;
 using IREE::HAL::ExecutableTargetAttr;
+using IREE::LinalgExt::getEncodingAttr;
 
 //===---------------------------------------------------------------------===//
 // Utility methods
@@ -42,11 +43,10 @@ static Operation *dropEncodingAndCloneOp(OpBuilder &builder, Operation *op,
   operands.append(convertedInputOperands.begin(), convertedInputOperands.end());
   operands.append(convertedOutputOperands.begin(),
                   convertedOutputOperands.end());
-  return mlir::clone(
-      builder, op,
-      {dropEncoding(
-          convertedOutputOperands[0].getType().cast<RankedTensorType>())},
-      operands);
+  return mlir::clone(builder, op,
+                     {dropEncoding(cast<RankedTensorType>(
+                         convertedOutputOperands[0].getType()))},
+                     operands);
 }
 
 static FailureOr<SmallVector<OpFoldResult>>
@@ -156,7 +156,7 @@ Value getMmt4dOperand(Value value, linalg::LinalgOp linalgOp,
   // operand is a vector and must be extended
   if ((cDims->m.empty() && operandIdx != 1) ||
       (cDims->n.empty() && operandIdx != 0)) {
-    auto type = value.getType().cast<RankedTensorType>();
+    auto type = cast<RankedTensorType>(value.getType());
     RankedTensorType newType = getExpandedType(
         type, /*isBatched=*/!cDims->batch.empty(),
         /*isTransposed=*/operandIdx == 2 && cDims->n.empty(), ri);
@@ -219,7 +219,13 @@ static FailureOr<tensor::PackOp> lowerSetEncodingOpToPackOp(
   if (!encoding) {
     return failure();
   }
-  std::optional<Value> paddingValue = getPaddingValue(source);
+  std::optional<Value> paddingValue;
+  if (encoding.getRoundDimsToArray().empty()) {
+    paddingValue = getPaddingValue(source);
+  } else {
+    paddingValue = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(resultType.getElementType()));
+  }
   SmallVector<OpFoldResult> sourceDims =
       tensor::getMixedSizes(rewriter, loc, source);
   SmallVector<OpFoldResult> resultDims = tensor::PackOp::getResultShape(
@@ -305,9 +311,9 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
   auto inputs = linalgOp.getDpsInputOperands();
   auto outputs = linalgOp.getDpsInits();
 
-  auto lhsType = inputs[0]->get().getType().cast<RankedTensorType>();
-  auto rhsType = inputs[1]->get().getType().cast<RankedTensorType>();
-  auto resultType = outputs[0].getType().cast<RankedTensorType>();
+  auto lhsType = cast<RankedTensorType>(inputs[0]->get().getType());
+  auto rhsType = cast<RankedTensorType>(inputs[1]->get().getType());
+  auto resultType = cast<RankedTensorType>(outputs[0].getType());
   auto lhsEncoding = getEncodingAttr(lhsType);
   auto rhsEncoding = getEncodingAttr(rhsType);
   auto resultEncoding = getEncodingAttr(resultType);
@@ -326,7 +332,7 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
 
   FailureOr<MaterializeEncodingInfo> materializeEncodingInfo =
       materializeEncodingFn(getOriginalTypeWithEncoding(
-          linalgOp->getResultTypes()[0].cast<RankedTensorType>()));
+          cast<RankedTensorType>(linalgOp->getResultTypes()[0])));
 
   Operation *result;
   if (failed(materializeEncodingInfo)) {
@@ -336,7 +342,7 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
   } else {
     auto elemTypes = llvm::map_to_vector(
         lhsEncoding.getElementTypes().getValue(),
-        [](Attribute a) { return a.cast<TypeAttr>().getValue(); });
+        [](Attribute a) { return cast<TypeAttr>(a).getValue(); });
     SmallVector<ReassociationIndices> ri;
     Value newLhs =
         getMmt4dOperand(operands[0], linalgOp, rewriter, ri, elemTypes,
@@ -350,7 +356,7 @@ lowerContractionOpWithEncoding(RewriterBase &rewriter,
 
     Type newResultType = newResult.getType();
 
-    auto cDims = getEncodingContractionDims(lhsEncoding);
+    auto cDims = IREE::LinalgExt::getEncodingContractionDims(lhsEncoding);
     if (cDims->batch.empty()) {
       result = rewriter.create<linalg::Mmt4DOp>(
           linalgOp.getLoc(), newResultType, ValueRange{newLhs, newRhs},
@@ -375,7 +381,7 @@ lowerOpWithEncoding(RewriterBase &rewriter, tensor::EmptyOp emptyOp,
                     ValueRange convertedOperands,
                     MaterializeEncodingFn materializeEncodingFn,
                     MaterializeEncodingValueFn materializeEncodingValueFn) {
-  auto emptyType = emptyOp->getResultTypes()[0].cast<RankedTensorType>();
+  auto emptyType = cast<RankedTensorType>(emptyOp->getResultTypes()[0]);
   auto resultType =
       getOriginalTypeWithEncoding(emptyType).clone(emptyType.getElementType());
   FailureOr<MaterializeEncodingInfo> materializeEncodingInfo =
@@ -451,7 +457,7 @@ static FailureOr<Operation *> lowerOpWithEncoding(
               genericOp, "indexing maps are not all identity maps");
         }
         auto convertedResultType =
-            convertedOutputOperands[0].getType().cast<RankedTensorType>();
+            cast<RankedTensorType>(convertedOutputOperands[0].getType());
         SmallVector<AffineMap> maps(
             2, AffineMap::getMultiDimIdentityMap(convertedResultType.getRank(),
                                                  rewriter.getContext()));
@@ -569,13 +575,14 @@ struct MaterializeInterfaceBindingEncoding
         getTypeConverter());
     // Get the dynamic dims of the target.
     Location loc = subspanOp.getLoc();
+    SmallVector<Value> newDynamicDims = subspanOp.getDynamicDims();
     FailureOr<SmallVector<Value>> convertedDynamicDims =
         getPackedDynamicDimsForDispatchTensor(
             rewriter, loc, *typeConverter, resultType,
             subspanOp.getDynamicDims(), this->materializeEncodingValueFn);
-    if (failed(convertedDynamicDims)) {
-      return rewriter.notifyMatchFailure(
-          subspanOp, "failed to get converted dynamic dims");
+    // Drop the encoding if the target does not support it.
+    if (succeeded(convertedDynamicDims)) {
+      newDynamicDims = convertedDynamicDims.value();
     }
 
     auto newResultType = IREE::Flow::DispatchTensorType::get(
@@ -583,7 +590,7 @@ struct MaterializeInterfaceBindingEncoding
     rewriter.replaceOpWithNewOp<IREE::HAL::InterfaceBindingSubspanOp>(
         subspanOp, newResultType, subspanOp.getSet(), subspanOp.getBinding(),
         subspanOp.getDescriptorType(), subspanOp.getByteOffset(),
-        convertedDynamicDims.value(), subspanOp.getAlignmentAttr(),
+        newDynamicDims, subspanOp.getAlignmentAttr(),
         subspanOp.getDescriptorFlagsAttr());
     return success();
   }
@@ -607,7 +614,7 @@ struct MaterializeFlowDispatchTensorLoadOp
     }
 
     auto sourceType = loadOp.getSourceType();
-    auto boundTensorType = sourceType.getBoundType();
+    auto boundTensorType = cast<RankedTensorType>(sourceType.getBoundType());
     auto *typeConverter = static_cast<const MaterializeEncodingTypeConverter *>(
         getTypeConverter());
     if (typeConverter->convertType(boundTensorType) == boundTensorType) {
@@ -615,25 +622,25 @@ struct MaterializeFlowDispatchTensorLoadOp
     }
 
     Location loc = loadOp.getLoc();
+    SmallVector<OpFoldResult> newMixedSizes = getMixedValues(
+        boundTensorType.getShape(), loadOp.getSourceDims(), rewriter);
     FailureOr<SmallVector<OpFoldResult>> convertedMixedSizes =
         getPackedDimsForDispatchTensor(rewriter, loc, *typeConverter,
                                        sourceType, loadOp.getSourceDims(),
                                        this->materializeEncodingValueFn);
-    if (failed(convertedMixedSizes)) {
-      return rewriter.notifyMatchFailure(
-          loadOp, "failed to get converted dynamic dims for result");
+    if (succeeded(convertedMixedSizes)) {
+      newMixedSizes = convertedMixedSizes.value();
     }
-    SmallVector<OpFoldResult> convertedOffsets(convertedMixedSizes->size(),
-                                               rewriter.getIndexAttr(0));
-    SmallVector<OpFoldResult> convertedStrides(convertedMixedSizes->size(),
-                                               rewriter.getIndexAttr(1));
-    SmallVector<int64_t> convertedStaticDims;
-    SmallVector<Value> convertedDynamicDims;
-    dispatchIndexOpFoldResults(convertedMixedSizes.value(),
-                               convertedDynamicDims, convertedStaticDims);
+    SmallVector<OpFoldResult> newOffsets(newMixedSizes.size(),
+                                         rewriter.getIndexAttr(0));
+    SmallVector<OpFoldResult> newStrides(newMixedSizes.size(),
+                                         rewriter.getIndexAttr(1));
+    SmallVector<int64_t> newStaticDims;
+    SmallVector<Value> newDynamicDims;
+    dispatchIndexOpFoldResults(newMixedSizes, newDynamicDims, newStaticDims);
     rewriter.replaceOpWithNewOp<IREE::Flow::DispatchTensorLoadOp>(
-        loadOp, adaptor.getSource(), convertedDynamicDims, convertedOffsets,
-        convertedMixedSizes.value(), convertedStrides);
+        loadOp, adaptor.getSource(), newDynamicDims, newOffsets, newMixedSizes,
+        newStrides);
 
     return success();
   }
@@ -657,7 +664,7 @@ struct MaterializeFlowDispatchTensorStoreOp
     }
 
     auto targetType = storeOp.getTargetType();
-    auto boundTensorType = targetType.getBoundType();
+    auto boundTensorType = cast<RankedTensorType>(targetType.getBoundType());
     auto *typeConverter = static_cast<const MaterializeEncodingTypeConverter *>(
         getTypeConverter());
 
@@ -666,25 +673,25 @@ struct MaterializeFlowDispatchTensorStoreOp
     }
 
     Location loc = storeOp.getLoc();
+    SmallVector<OpFoldResult> newMixedSizes = getMixedValues(
+        boundTensorType.getShape(), storeOp.getTargetDims(), rewriter);
     FailureOr<SmallVector<OpFoldResult>> convertedMixedSizes =
         getPackedDimsForDispatchTensor(rewriter, loc, *typeConverter,
                                        targetType, storeOp.getTargetDims(),
                                        this->materializeEncodingValueFn);
-    if (failed(convertedMixedSizes)) {
-      return rewriter.notifyMatchFailure(
-          storeOp, "failed to get converted dynamic dims for result");
+    if (succeeded(convertedMixedSizes)) {
+      newMixedSizes = convertedMixedSizes.value();
     }
-    SmallVector<OpFoldResult> convertedOffsets(convertedMixedSizes->size(),
-                                               rewriter.getIndexAttr(0));
-    SmallVector<OpFoldResult> convertedStrides(convertedMixedSizes->size(),
-                                               rewriter.getIndexAttr(1));
-    SmallVector<int64_t> convertedStaticDims;
-    SmallVector<Value> convertedDynamicDims;
-    dispatchIndexOpFoldResults(convertedMixedSizes.value(),
-                               convertedDynamicDims, convertedStaticDims);
+    SmallVector<OpFoldResult> newOffsets(newMixedSizes.size(),
+                                         rewriter.getIndexAttr(0));
+    SmallVector<OpFoldResult> newStrides(newMixedSizes.size(),
+                                         rewriter.getIndexAttr(1));
+    SmallVector<int64_t> newStaticDims;
+    SmallVector<Value> newDynamicDims;
+    dispatchIndexOpFoldResults(newMixedSizes, newDynamicDims, newStaticDims);
     rewriter.replaceOpWithNewOp<IREE::Flow::DispatchTensorStoreOp>(
-        storeOp, adaptor.getValue(), adaptor.getTarget(), convertedDynamicDims,
-        convertedOffsets, convertedMixedSizes.value(), convertedStrides);
+        storeOp, adaptor.getValue(), adaptor.getTarget(), newDynamicDims,
+        newOffsets, newMixedSizes, newStrides);
     return success();
   }
 };

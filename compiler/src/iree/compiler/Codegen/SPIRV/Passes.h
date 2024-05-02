@@ -86,9 +86,6 @@ createSPIRVAnnotateWinogradLoopsPass();
 std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createSPIRVBreakDownLargeVectorPass();
 
-/// Pass to distribute tiled loop nests to invocations.
-std::unique_ptr<InterfacePass<FunctionOpInterface>> createSPIRVDistributePass();
-
 /// Emulates bfloat 16 ops with 32-bit float ops.
 std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createSPIRVEmulateBf16Pass();
@@ -150,9 +147,6 @@ createSPIRVTileAndDistributePass();
 std::unique_ptr<InterfacePass<FunctionOpInterface>>
 createSPIRVTileAndPromotePass(bool promoteCMatrix = false,
                               bool skipThreadLevel = false);
-
-/// Pass to tile Linalg ops with tensor semantics to invocations.
-std::unique_ptr<InterfacePass<FunctionOpInterface>> createSPIRVTilePass();
 
 /// Pass to tile Linalg ops with buffer semantics suitable for lowering to
 /// SPIR-V cooperative ops.

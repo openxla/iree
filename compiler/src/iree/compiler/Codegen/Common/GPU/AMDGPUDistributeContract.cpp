@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <numeric>
 #include "iree/compiler/Codegen/Common/GPU/GPUVectorDistribution.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.h"
 #include "iree/compiler/Codegen/Utils/VectorOpUtils.h"
@@ -40,7 +41,7 @@ struct DistributeContract final : OpDistributionPattern<vector::ContractionOp> {
       return rewriter.notifyMatchFailure(
           contractOp, "missing nested layout for contraction result");
     }
-    int64_t rank = resultLayout.getBatchOrder().size();
+    int64_t rank = resultLayout.getRank();
 
     NestedLayoutAttr lhsLayout =
         dyn_cast<NestedLayoutAttr>(signature[contractOp.getLhs()]);
@@ -97,12 +98,12 @@ struct DistributeContract final : OpDistributionPattern<vector::ContractionOp> {
     LLVM_DEBUG(llvm::dbgs() << "init tile: " << finalTile << "\n");
 
     // Offsets into the LHS/RHS batches.
-    SmallVector<int64_t, 2> lhsBatchOffsets(rank, 0);
-    SmallVector<int64_t, 2> rhsBatchOffsets(rank, 0);
+    SmallVector<int64_t> lhsBatchOffsets(rank, 0);
+    SmallVector<int64_t> rhsBatchOffsets(rank, 0);
 
     // Offsets into the result batches.
     ArrayRef<int64_t> resultBatches = resultLayout.getBatchesPerSubgroup();
-    SmallVector<int64_t, 2> resultBatchTileSizes(rank, 1);
+    SmallVector<int64_t> resultBatchTileSizes(rank, 1);
     LLVM_DEBUG({
       llvm::dbgs() << "result batches: [";
       llvm::interleaveComma(resultBatches, llvm::dbgs());
@@ -114,18 +115,22 @@ struct DistributeContract final : OpDistributionPattern<vector::ContractionOp> {
     Value lhs = getDistributed(rewriter, contractOp.getLhs(), lhsLayout);
     Value rhs = getDistributed(rewriter, contractOp.getRhs(), rhsLayout);
 
+    SmallVector<AffineMap> indexingMaps = contractOp.getIndexingMapsArray();
+    AffineMap lhsMap = compressUnusedDims(indexingMaps[0]);
+    AffineMap rhsMap = compressUnusedDims(indexingMaps[1]);
+    AffineMap resMap = compressUnusedDims(indexingMaps[2]);
+
+    SmallVector<int64_t> resBatchOrder(resMap.getNumResults());
+    std::iota(resBatchOrder.begin(), resBatchOrder.end(), 0);
+    resBatchOrder = applyPermutationMap(resMap, ArrayRef(resBatchOrder));
+
     // Iterate over all result batches and unroll computation to direct MFMA
     // intrinsic ops.
     Location loc = contractOp.getLoc();
     auto resultTiles = StaticTileOffsetRange(
-        resultBatches, resultBatchTileSizes, resultLayout.getBatchOrder());
+        resultBatches, resultBatchTileSizes, resBatchOrder);
     SmallVector<int64_t, 2> resultBatchOffsets;
-    for (SmallVector<int64_t, 2> originalResultBatchOffsets : resultTiles) {
-      // Permute the result batch offsets first to match the distributed shape
-      // dim order for indexing.
-      resultBatchOffsets = originalResultBatchOffsets;
-      applyPermutationToVector(resultBatchOffsets,
-                               resultLayout.getBatchOrder());
+    for (SmallVector<int64_t, 2> resultBatchOffsets : resultTiles) {
       LLVM_DEBUG({
         llvm::dbgs() << "current result batch offsets: [";
         llvm::interleaveComma(resultBatchOffsets, llvm::dbgs());
@@ -151,9 +156,9 @@ struct DistributeContract final : OpDistributionPattern<vector::ContractionOp> {
         // Fills the batch offsets for LHS and RHS. For the K dimension it's the
         // induction variable; for the M/N dimension we need to extract from the
         // result batch offsets.
-        fillOperandBatchOffsets(opDetail, k, originalResultBatchOffsets,
-                                resultLayout, lhsBatchOffsets, rhsBatchOffsets,
-                                lhsLayout, rhsLayout);
+        fillOperandBatchOffsets(opDetail, k, resultBatchOffsets,
+                                lhsBatchOffsets, rhsBatchOffsets, lhsMap,
+                                rhsMap);
         LLVM_DEBUG({
           llvm::dbgs() << "current lhs batch offsets: [";
           llvm::interleaveComma(lhsBatchOffsets, llvm::dbgs());
@@ -183,7 +188,7 @@ struct DistributeContract final : OpDistributionPattern<vector::ContractionOp> {
   std::optional<int64_t> getKBatchSize(const VectorContractOpInfo &opDetail,
                                        NestedLayoutAttr lhsLayout,
                                        NestedLayoutAttr rhsLayout) const {
-    auto [lhsK, rhsK] = *opDetail.getOperandKIndex();
+    auto [lhsK, rhsK] = opDetail.getOperandKIndex();
     int64_t lhsKBatch = lhsLayout.getBatchesPerSubgroup()[lhsK];
     int64_t rhsKBatch = rhsLayout.getBatchesPerSubgroup()[rhsK];
 
@@ -196,25 +201,30 @@ struct DistributeContract final : OpDistributionPattern<vector::ContractionOp> {
   // both LHS and RHS.
   void fillOperandBatchOffsets(const VectorContractOpInfo &opDetail,
                                int64_t kOffset, ArrayRef<int64_t> resultOffsets,
-                               NestedLayoutAttr resultLayout,
-                               SmallVector<int64_t, 2> &lhsOffsets,
-                               SmallVector<int64_t, 2> &rhsOffsets,
-                               NestedLayoutAttr lhsLayout,
-                               NestedLayoutAttr rhsLayout) const {
-    auto [lhsM, rhsN] = *opDetail.getOperandMNIndex();
-    auto [lhsK, rhsK] = *opDetail.getOperandKIndex();
-    auto [resultM, resultN] = *opDetail.getResultMNIndex();
+                               SmallVector<int64_t> &lhsOffsets,
+                               SmallVector<int64_t> &rhsOffsets,
+                               AffineMap lhsMap, AffineMap rhsMap) const {
+    auto [lhsK, rhsK] = opDetail.getOperandKIndex();
     // resultOffsets contains batch indices into the C/D vector. It is a 2-D
     // index for both M and N. We need to split out for M and N, and add index
     // for K.
-    lhsOffsets[lhsM] = resultOffsets[resultM];
-    lhsOffsets[lhsK] = kOffset;
-    rhsOffsets[rhsN] = resultOffsets[resultN];
-    rhsOffsets[rhsK] = kOffset;
+    for (auto [lhsM, resultM] :
+         llvm::zip_equal(opDetail.lhsMDims, opDetail.outMDims)) {
+      lhsOffsets[lhsM] = resultOffsets[resultM];
+    }
 
-    // Now apply permutation on LHS/RHS according to their batch order.
-    applyPermutationToVector(lhsOffsets, lhsLayout.getBatchOrder());
-    applyPermutationToVector(rhsOffsets, rhsLayout.getBatchOrder());
+    if (opDetail.getBatchCount() == 1) {
+      rhsOffsets[0] = resultOffsets[0];
+      lhsOffsets[0] = resultOffsets[0];
+    }
+
+    for (auto [rhsN, resultN] :
+         llvm::zip_equal(opDetail.rhsNDims, opDetail.outNDims)) {
+      rhsOffsets[rhsN] = resultOffsets[resultN];
+    }
+
+    lhsOffsets[lhsK] = kOffset;
+    rhsOffsets[rhsK] = kOffset;
   }
 
   struct AMDMMAParameters {

@@ -37,6 +37,17 @@ def GPUDistributeSharedMemoryCopy :
   let constructor = "mlir::iree_compiler::createGPUDistributeSharedMemoryCopy()";
 }
 
+def GPUDistributeScfFor :
+    InterfacePass<"iree-codegen-gpu-distribute-scf-for", "mlir::FunctionOpInterface"> {
+  let summary = "Distribute tiled loop nests to invocations";
+  let constructor = "mlir::iree_compiler::createGPUDistributeScfForPass()";
+  let options = [
+    Option<"useBlockDims", "use-block-dims", "bool",
+           /*default=*/"true",
+           "Use gpu.block_dim ops to query distribution sizes.">,
+  ];
+}
+
 def GPUGeneralizeNamedOps :
     InterfacePass<"iree-codegen-gpu-generalize-named-ops", "mlir::FunctionOpInterface"> {
   let summary = "Convert named Linalg ops to linalg.generic ops";
@@ -106,6 +117,11 @@ def GPUTensorTileToSerialLoops :
     InterfacePass<"iree-codegen-gpu-tensor-tile-to-serial-loops", "mlir::FunctionOpInterface"> {
   let summary = "Pass to tile reduction dimensions for certain GPU ops";
   let constructor = "mlir::iree_compiler::createGPUTensorTileToSerialLoops()";
+}
+
+def GPUTile : InterfacePass<"iree-codegen-gpu-tile", "mlir::FunctionOpInterface"> {
+  let summary = "Tile Linalg ops with tensor semantics to invocations";
+  let constructor = "mlir::iree_compiler::createGPUTilePass()";
 }
 
 def GPUTileReduction :
