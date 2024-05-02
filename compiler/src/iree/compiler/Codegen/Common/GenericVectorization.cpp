@@ -16,6 +16,7 @@
 #include "mlir/Dialect/SCF/Utils/Utils.h"
 #include "mlir/Dialect/Vector/Transforms/LoweringPatterns.h"
 #include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
+#include "mlir/Dialect/Vector/Utils/VectorUtils.h"
 #include "mlir/Interfaces/ValueBoundsOpInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -313,44 +314,6 @@ public:
   void runOnOperation() override;
 };
 
-/// Returns success if `inputVectorSizes` is a valid masking configuraion for
-/// given `shape`, i.e., it meets:
-///   1. The numbers of elements in both array are equal.
-///   2. `inputVectorSizes` does nos have dynamic dimensions.
-///   3. All the values in `inputVectorSizes` are greater than or equal to
-///      static sizes in `shape`.
-/// TODO: lubol Remove when PR https://github.com/llvm/llvm-project/pull/89119
-/// is propagated.
-static LogicalResult
-isValidMaskedInputVector(ArrayRef<int64_t> shape,
-                         ArrayRef<int64_t> inputVectorSizes) {
-  VEC_LDBG("Iteration space static sizes:");
-  LLVM_DEBUG(llvm::interleaveComma(shape, llvm::dbgs()));
-  LLVM_DEBUG(llvm::dbgs() << "\n");
-
-  if (inputVectorSizes.size() != shape.size()) {
-    VEC_LDBG("Input vector sizes don't match the number of loops");
-    return failure();
-  }
-  if (ShapedType::isDynamicShape(inputVectorSizes)) {
-    VEC_LDBG("Input vector sizes can't have dynamic dimensions");
-    return failure();
-  }
-  if (!llvm::all_of(llvm::zip(shape, inputVectorSizes),
-                    [](std::tuple<int64_t, int64_t> sizePair) {
-                      int64_t staticSize = std::get<0>(sizePair);
-                      int64_t inputSize = std::get<1>(sizePair);
-                      return ShapedType::isDynamic(staticSize) ||
-                             staticSize <= inputSize;
-                    })) {
-    VEC_LDBG(
-        "Input vector sizes must be greater than or equal to iteration space "
-        "static sizes");
-    return failure();
-  }
-  return success();
-}
-
 static LogicalResult
 vectorizeTopkOpPrecondition(IREE::LinalgExt::TopkOp topkOp,
                             ArrayRef<int64_t> inputVectorSizes) {
@@ -375,8 +338,8 @@ vectorizeTopkOpPrecondition(IREE::LinalgExt::TopkOp topkOp,
     return failure();
   }
 
-  if (failed(isValidMaskedInputVector(inShape.take_front(topkOp.getInputRank()),
-                                      inputVectorSizes)))
+  if (failed(vector::isValidMaskedInputVector(
+          inShape.take_front(topkOp.getInputRank()), inputVectorSizes)))
     return failure();
   return success();
 }
@@ -475,52 +438,6 @@ static LogicalResult addIterArgs(RewriterBase &rewriter, Location loc,
         loopBody.getArgument(mapping.second + newForOp.getNumInductionVars());
   }
   return success();
-}
-
-/// Create a TransferReadOp from `source` with static shape `readShape`. If the
-/// vector type for the read is not the same as the type of `source`, then a
-/// mask is created on the read.
-// TODO: lubol Remove when PR https://github.com/llvm/llvm-project/pull/89119 is
-// propagated.
-Value static createReadOrMaskedRead(OpBuilder &builder, Location loc,
-                                    Value source, ArrayRef<int64_t> readShape,
-                                    Value padValue,
-                                    bool useInBoundsInsteadOfMasking = false) {
-  assert(llvm::none_of(readShape,
-                       [](int64_t s) { return s == ShapedType::kDynamic; }) &&
-         "expected static shape");
-  auto sourceShapedType = cast<ShapedType>(source.getType());
-  auto sourceShape = sourceShapedType.getShape();
-  assert(sourceShape.size() == readShape.size() && "expected same ranks.");
-  auto maskType = VectorType::get(readShape, builder.getI1Type());
-  auto vectorType = VectorType::get(readShape, padValue.getType());
-  assert(padValue.getType() == sourceShapedType.getElementType() &&
-         "expected same pad element type to match source element type");
-  int64_t readRank = readShape.size();
-  auto zero = builder.create<arith::ConstantIndexOp>(loc, 0);
-  SmallVector<bool> inBoundsVal(readRank, true);
-  if (!useInBoundsInsteadOfMasking) {
-    // Update the inBounds attribute.
-    for (unsigned i = 0; i < readRank; i++)
-      inBoundsVal[i] = (sourceShape[i] == readShape[i]) &&
-                       !ShapedType::isDynamic(sourceShape[i]);
-  }
-  auto transferReadOp = builder.create<vector::TransferReadOp>(
-      loc,
-      /*vectorType=*/vectorType,
-      /*source=*/source,
-      /*indices=*/SmallVector<Value>(readRank, zero),
-      /*padding=*/padValue,
-      /*inBounds=*/inBoundsVal);
-
-  if (llvm::equal(readShape, sourceShape) || !useInBoundsInsteadOfMasking)
-    return transferReadOp;
-  SmallVector<OpFoldResult> mixedSourceDims =
-      tensor::getMixedSizes(builder, loc, source);
-  Value mask =
-      builder.create<vector::CreateMaskOp>(loc, maskType, mixedSourceDims);
-  return mlir::vector::maskOperation(builder, transferReadOp, mask)
-      ->getResult(0);
 }
 
 struct InsertElemContinuationValues {
@@ -1010,11 +927,8 @@ vectorizeAsLinalgExtTopK(RewriterBase &rewriter, IREE::LinalgExt::TopkOp topkOp,
   }
 
   Value padValue = rewriter.create<arith::ConstantOp>(loc, minAttr);
-  // TODO: lubol Remove when PR https://github.com/llvm/llvm-project/pull/89119
-  // is propagated and call the new mlir::vector::createReadOrMaskedRead utility
-  // function.
-  Value inValsVec = createReadOrMaskedRead(rewriter, loc, topkOp.getInputs()[0],
-                                           inputVectorSizes, padValue, false);
+  Value inValsVec = vector::createReadOrMaskedRead(
+      rewriter, loc, topkOp.getInputs()[0], inputVectorSizes, padValue, true);
   auto elemVecType = VectorType::get(inputVectorSizes, inElemTy);
   Value smallestMask = rewriter.create<vector::BroadcastOp>(
       loc, elemVecType, ifInitOut.getResult(2));
