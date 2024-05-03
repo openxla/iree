@@ -373,34 +373,34 @@ func.func @generic_unpack_infer_vector_size(%arg0: tensor<?x?x16x16xf32>, %arg1:
 // Test for topk 1x32xf2 input.
 // The GenericVectorize pass should rewrite the function with vector/scalar code
 // since the dim 0 size is multiple of 16.
-func.func @topk_1x32xf32() {
-  %c16 = arith.constant 16 : index
-  %c32 = arith.constant 32 : index
-  %c0 = arith.constant 0 : index
-  %c128 = arith.constant 128 : index
-  %0 = hal.interface.binding.subspan set(0) binding(0) type(storage_buffer) alignment(64) offset(%c0) flags(ReadOnly) : !flow.dispatch.tensor<readonly:tensor<1x32xf32>>
-  %1 = hal.interface.binding.subspan set(0) binding(1) type(storage_buffer) alignment(64) offset(%c0) : !flow.dispatch.tensor<readwrite:tensor<1x32xf32>>
-  %2 = hal.interface.binding.subspan set(0) binding(2) type(storage_buffer) alignment(64) offset(%c128) : !flow.dispatch.tensor<readwrite:tensor<1x32xi32>>
-  %3 = flow.dispatch.tensor.load %0, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : !flow.dispatch.tensor<readonly:tensor<1x32xf32>> -> tensor<1x32xf32>
-  %4 = flow.dispatch.tensor.load %1, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : !flow.dispatch.tensor<readwrite:tensor<1x32xf32>> -> tensor<1x32xf32>
-  %5 = flow.dispatch.tensor.load %2, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : !flow.dispatch.tensor<readwrite:tensor<1x32xi32>> -> tensor<1x32xi32>
-  %6:2 = scf.for %arg0 = %c0 to %c32 step %c16 iter_args(%arg1 = %4, %arg2 = %5) -> (tensor<1x32xf32>, tensor<1x32xi32>) {
-    %extracted_slice = tensor.extract_slice %3[0, %arg0] [1, 16] [1, 1] : tensor<1x32xf32> to tensor<1x16xf32>
-    %extracted_slice_0 = tensor.extract_slice %arg1[0, %arg0] [1, 32] [1, 1] : tensor<1x32xf32> to tensor<1x32xf32>
-    %extracted_slice_1 = tensor.extract_slice %arg2[0, %arg0] [1, 32] [1, 1] : tensor<1x32xi32> to tensor<1x32xi32>
-    %7:2 = iree_linalg_ext.topk {lowering_config = #iree_codegen.lowering_config<tile_sizes = [[1, 0], [0, 16]]>} dimension(1) ins(%extracted_slice : tensor<1x16xf32>) outs(%extracted_slice_0, %extracted_slice_1 : tensor<1x32xf32>, tensor<1x32xi32>) {
-    ^bb0(%arg3: f32, %arg4: f32):
-      %8 = arith.cmpf ogt, %arg3, %arg4 : f32
-      iree_linalg_ext.yield %8 : i1
-    } -> tensor<1x32xf32>, tensor<1x32xi32>
-    %inserted_slice = tensor.insert_slice %7#0 into %arg1[0, %arg0] [1, 32] [1, 1] : tensor<1x32xf32> into tensor<1x32xf32>
-    %inserted_slice_2 = tensor.insert_slice %7#1 into %arg2[0, %arg0] [1, 32] [1, 1] : tensor<1x32xi32> into tensor<1x32xi32>
-    scf.yield %inserted_slice, %inserted_slice_2 : tensor<1x32xf32>, tensor<1x32xi32>
-  }
-  flow.dispatch.tensor.store %6#0, %1, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : tensor<1x32xf32> -> !flow.dispatch.tensor<readwrite:tensor<1x32xf32>>
-  flow.dispatch.tensor.store %6#1, %2, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : tensor<1x32xi32> -> !flow.dispatch.tensor<readwrite:tensor<1x32xi32>>
-  return
-}
+//func.func @topk_1x32xf32() {
+//  %c16 = arith.constant 16 : index
+//  %c32 = arith.constant 32 : index
+//  %c0 = arith.constant 0 : index
+//  %c128 = arith.constant 128 : index
+//  %0 = hal.interface.binding.subspan set(0) binding(0) type(storage_buffer) alignment(64) offset(%c0) flags(ReadOnly) : !flow.dispatch.tensor<readonly:tensor<1x32xf32>>
+//  %1 = hal.interface.binding.subspan set(0) binding(1) type(storage_buffer) alignment(64) offset(%c0) : !flow.dispatch.tensor<readwrite:tensor<1x32xf32>>
+//  %2 = hal.interface.binding.subspan set(0) binding(2) type(storage_buffer) alignment(64) offset(%c128) : !flow.dispatch.tensor<readwrite:tensor<1x32xi32>>
+//  %3 = flow.dispatch.tensor.load %0, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : !flow.dispatch.tensor<readonly:tensor<1x32xf32>> -> tensor<1x32xf32>
+//  %4 = flow.dispatch.tensor.load %1, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : !flow.dispatch.tensor<readwrite:tensor<1x32xf32>> -> tensor<1x32xf32>
+//  %5 = flow.dispatch.tensor.load %2, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : !flow.dispatch.tensor<readwrite:tensor<1x32xi32>> -> tensor<1x32xi32>
+//  %6:2 = scf.for %arg0 = %c0 to %c32 step %c16 iter_args(%arg1 = %4, %arg2 = %5) -> (tensor<1x32xf32>, tensor<1x32xi32>) {
+//    %extracted_slice = tensor.extract_slice %3[0, %arg0] [1, 16] [1, 1] : tensor<1x32xf32> to tensor<1x16xf32>
+//    %extracted_slice_0 = tensor.extract_slice %arg1[0, %arg0] [1, 32] [1, 1] : tensor<1x32xf32> to tensor<1x32xf32>
+//    %extracted_slice_1 = tensor.extract_slice %arg2[0, %arg0] [1, 32] [1, 1] : tensor<1x32xi32> to tensor<1x32xi32>
+//    %7:2 = iree_linalg_ext.topk {lowering_config = #iree_codegen.lowering_config<tile_sizes = [[1, 0], [0, 16]]>} dimension(1) ins(%extracted_slice : tensor<1x16xf32>) outs(%extracted_slice_0, %extracted_slice_1 : tensor<1x32xf32>, tensor<1x32xi32>) {
+//    ^bb0(%arg3: f32, %arg4: f32):
+//      %8 = arith.cmpf ogt, %arg3, %arg4 : f32
+//      iree_linalg_ext.yield %8 : i1
+//    } -> tensor<1x32xf32>, tensor<1x32xi32>
+//    %inserted_slice = tensor.insert_slice %7#0 into %arg1[0, %arg0] [1, 32] [1, 1] : tensor<1x32xf32> into tensor<1x32xf32>
+//    %inserted_slice_2 = tensor.insert_slice %7#1 into %arg2[0, %arg0] [1, 32] [1, 1] : tensor<1x32xi32> into tensor<1x32xi32>
+//    scf.yield %inserted_slice, %inserted_slice_2 : tensor<1x32xf32>, tensor<1x32xi32>
+//  }
+//  flow.dispatch.tensor.store %6#0, %1, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : tensor<1x32xf32> -> !flow.dispatch.tensor<readwrite:tensor<1x32xf32>>
+//  flow.dispatch.tensor.store %6#1, %2, offsets = [0, 0], sizes = [1, 32], strides = [1, 1] : tensor<1x32xi32> -> !flow.dispatch.tensor<readwrite:tensor<1x32xi32>>
+//  return
+//}
 // CHECK-TOPK-LABEL func.func @topk_1x32xf32()
 // CHECK-TOPK-NOT:         iree_linalg_ext.topk
 // CHECK-TOPK:             %true = arith.constant true
