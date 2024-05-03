@@ -340,7 +340,7 @@ vectorizeTopkOpPrecondition(IREE::LinalgExt::TopkOp topkOp,
   if (failed(vector::isValidMaskedInputVector(
           inShape.take_front(topkOp.getInputRank()), inputVectorSizes)))
     return failure();
-  return failure(); // Lubo 
+  return failure(); // Lubo
   // return success(); // Lubo
 }
 
