@@ -22,14 +22,14 @@ iree_check_single_backend_test_suite(
             "scan.mlir",
             "scatter.mlir",
             "sort.mlir",
-            "top-k-vectorize.mlir",
+            "top-k-vector.mlir",
             "top-k.mlir",
         ],
         include = ["*.mlir"],
         exclude = [
             "attention.mlir",
             # Top-k-vector tests disabled due to an error for vector_call_topk_1x256.
-            "top-k-vector.mlir",
+            # "top-k-vector.mlir",
             "winograd_input.mlir",
             "winograd_output.mlir",
         ],
@@ -49,7 +49,7 @@ iree_check_single_backend_test_suite(
 iree_check_single_backend_test_suite(
     name = "check_cuda-topk-split-reduction",
     srcs = [
-        "top-k-vectorize.mlir",
+        "top-k-vector.mlir",
         "top-k.mlir",
     ],
     compiler_flags = ["--iree-flow-topk-split-reduction=2"],
@@ -68,7 +68,7 @@ iree_check_single_backend_test_suite(
 iree_check_single_backend_test_suite(
     name = "check_cuda-topk-split-reduction-double",
     srcs = [
-        "top-k-vectorize.mlir",
+        "top-k-vector.mlir",
         "top-k.mlir",
     ],
     compiler_flags = ["--iree-flow-topk-split-reduction=3,2"],
