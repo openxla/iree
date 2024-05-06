@@ -18,7 +18,7 @@ endif()
 
 # system-library plugin mechanism using the system dynamic library loader.
 if(IREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY)
-  
+
 add_library(iree_samples_custom_dispatch_cpu_mlp_plugin SHARED
   mlp_plugin.c
 )
@@ -56,39 +56,43 @@ iree_lit_test_suite(
     "hostonly"
 )
 
-iree_lit_test_suite(
-  NAME
-    mlp_tosa_example
-  SRCS
-    "mlp_tosa.mlir"
-  TOOLS
-    FileCheck
-    iree-compile
-    iree-run-module
-    iree_samples_custom_dispatch_cpu_mlp_plugin
-  DATA
-    "mlp_tosa_spec.pdl.mlir"
-  LABELS
-    "driver=local-sync"
-    "hostonly"
-)
+if(IREE_INPUT_TOSA)
+  iree_lit_test_suite(
+    NAME
+      mlp_tosa_example
+    SRCS
+      "mlp_tosa.mlir"
+    TOOLS
+      FileCheck
+      iree-compile
+      iree-run-module
+      iree_samples_custom_dispatch_cpu_mlp_plugin
+    DATA
+      "mlp_tosa_spec.pdl.mlir"
+    LABELS
+      "driver=local-sync"
+      "hostonly"
+  )
+endif()
 
-iree_lit_test_suite(
-  NAME
-    mlp_torch_example
-  SRCS
-    "mlp_torch.mlir"
-  TOOLS
-    FileCheck
-    iree-compile
-    iree-run-module
-    iree_samples_custom_dispatch_cpu_mlp_plugin
-  DATA
-    "mlp_torch_spec.pdl.mlir"
-  LABELS
-    "driver=local-sync"
-    "hostonly"
-)
+if(IREE_INPUT_TORCH)
+  iree_lit_test_suite(
+    NAME
+      mlp_torch_example
+    SRCS
+      "mlp_torch.mlir"
+    TOOLS
+      FileCheck
+      iree-compile
+      iree-run-module
+      iree_samples_custom_dispatch_cpu_mlp_plugin
+    DATA
+      "mlp_torch_spec.pdl.mlir"
+    LABELS
+      "driver=local-sync"
+      "hostonly"
+  )
+endif()
 
 iree_lit_test_suite(
   NAME
@@ -107,5 +111,7 @@ iree_lit_test_suite(
     "driver=local-sync"
     "hostonly"
 )
+
+add_subdirectory(pdll)
 
 endif(IREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY)

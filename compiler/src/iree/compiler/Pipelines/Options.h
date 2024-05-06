@@ -63,10 +63,12 @@ struct InputDialectOptions {
 //   1. Through a preprocessing pass pipeline.
 //   2. Through a Transform dialect spec file.
 //   3. Through a PDL spec file.
+//   4. Through a PDLL spec file.
 struct PreprocessingOptions {
   std::string preprocessingPassPipeline;
   std::string preprocessingTransformSpecFilename;
   std::string preprocessingPDLSpecFilename;
+  std::string preprocessingPDLLSpecFilename;
 
   // DEPRECATED: do not put pass-specific options here and instead use the
   // pass pipeline.

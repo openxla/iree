@@ -103,6 +103,19 @@ void buildPreprocessingPassPipeline(
     passManager.addPass(
         Preprocessing::createTransposeMatmulPass(transposeMatmulOptions));
   }
+
+// TODO(#17233)
+#ifdef IREE_LLVM_BUNDLED
+  if (!preprocessingOptions.preprocessingPDLLSpecFilename.empty()) {
+    Preprocessing::ApplyPDLLPatternsPassOptions applyPDLLPatternsOptions;
+    applyPDLLPatternsOptions.patternsFile =
+        preprocessingOptions.preprocessingPDLLSpecFilename;
+    passManager.addPass(
+        Preprocessing::createApplyPDLLPatternsPass(applyPDLLPatternsOptions));
+    passManager.addPass(createCanonicalizerPass());
+    passManager.addPass(createCSEPass());
+  }
+#endif
 }
 
 static void

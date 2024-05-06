@@ -73,24 +73,31 @@ InputDialectOptions::Type InputDialectOptions::parseInputTypeMnemonic() {
 void PreprocessingOptions::bindOptions(OptionsBinder &binder) {
   static llvm::cl::OptionCategory category(
       "IREE options for apply custom preprocessing before normal IREE "
-      "compilation flow");
+      "compilation flow (ordered transform dialect -> pdl -> "
+      "pdll)");
 
   binder.opt<std::string>(
       "iree-preprocessing-pass-pipeline", preprocessingPassPipeline,
       llvm::cl::desc("Textual description of the pass pipeline to run before "
-                     "running normal IREE compilation pipelines."),
+                     "running normal IREE compilation pipelines"),
       llvm::cl::cat(category));
   binder.opt<std::string>(
       "iree-preprocessing-transform-spec-filename",
       preprocessingTransformSpecFilename,
       llvm::cl::desc(
-          "File name of a transform dialect spec to use for preprocessing."),
+          "File name of a transform dialect spec to use for preprocessing"),
       llvm::cl::cat(category));
   binder.opt<std::string>(
       "iree-preprocessing-pdl-spec-filename", preprocessingPDLSpecFilename,
-      llvm::cl::desc(
-          "File name of a transform dialect spec to use for preprocessing."),
+      llvm::cl::desc("File name of a PDL spec to use for preprocessing"),
       llvm::cl::cat(category));
+// TODO(#17233)
+#ifdef IREE_LLVM_BUNDLED
+  binder.opt<std::string>(
+      "iree-preprocessing-pdll-spec-filename", preprocessingPDLLSpecFilename,
+      llvm::cl::desc("File name of a PDLL spec to use for preprocessing"),
+      llvm::cl::cat(category));
+#endif
 
   // DEPRECATED: do not add explicit options for specific passes.
   binder.opt<TransposeMatmulInput>(
