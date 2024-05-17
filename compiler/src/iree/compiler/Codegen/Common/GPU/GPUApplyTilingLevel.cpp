@@ -106,12 +106,11 @@ applyTileAndFuseToEachRoot(RewriterBase &rewriter,
 
       // TODO: Add some helpers to construct this based on the enum type rather
       // than doing it here.
-      SmallVector<DeviceMappingAttrInterface> mapping;
-      int idx = 0;
-      for (auto size : tileSizes) {
+      SmallVector<Attribute> mapping;
+      for (auto [idx, size] : llvm::enumerate(tileSizes)) {
         if (!isConstantIntValue(size, 0)) {
           unsigned mappingId =
-              static_cast<unsigned>(gpu::MappingId::LinearDim0) + idx++;
+              static_cast<unsigned>(gpu::MappingId::LinearDim0) + idx;
           mapping.push_back(gpu::GPUThreadMappingAttr::get(
               context, static_cast<gpu::MappingId>(mappingId)));
         }
