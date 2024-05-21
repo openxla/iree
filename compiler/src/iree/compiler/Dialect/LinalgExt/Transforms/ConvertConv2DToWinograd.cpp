@@ -21,6 +21,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -82,6 +83,20 @@ createExpand(Value tensor, Location loc, PatternRewriter &rewriter,
   auto resultType = RankedTensorType::get(outputShape, elementTy);
   return rewriter.create<tensor::ExpandShapeOp>(loc, resultType, tensor,
                                                 reassociations);
+}
+
+static Value createTranspose(OpBuilder &builder, Value source,
+                             SmallVector<int64_t> perm) {
+  SmallVector<OpFoldResult> mixedSizes =
+      tensor::getMixedSizes(builder, source.getLoc(), source);
+  applyPermutationToVector(mixedSizes, perm);
+  Type elemType = cast<RankedTensorType>(source.getType()).getElementType();
+  Value empty =
+      builder.create<tensor::EmptyOp>(source.getLoc(), mixedSizes, elemType)
+          .getResult();
+  return builder
+      .create<linalg::TransposeOp>(source.getLoc(), source, empty, perm)
+      ->getResult(0);
 }
 
 namespace {
@@ -196,11 +211,12 @@ public:
     const int64_t inputTileSize = outputTileSize + kernelSize - 1;
 
     Location loc = convOp.getLoc();
+    const std::array<int64_t, 2> inputTileDimsKernel = {2, 3};
     const std::array<int64_t, 2> hwcfKernelDims = {0, 1};
     const std::array<int64_t, 2> fchwKernelDims = {2, 3};
     SmallVector<int64_t> filterResultShape(4, inputTileSize);
-    filterResultShape[2] = isNchwFchw ? kernelShape[1] : kernelShape[2];
-    filterResultShape[3] = isNchwFchw ? kernelShape[0] : kernelShape[3];
+    filterResultShape[0] = isNchwFchw ? kernelShape[1] : kernelShape[2];
+    filterResultShape[1] = isNchwFchw ? kernelShape[0] : kernelShape[3];
     Value kernelInit =
         rewriter.create<tensor::EmptyOp>(loc, filterResultShape, inElemType);
     const std::array<int64_t, 2> kernelDims =
@@ -209,15 +225,16 @@ public:
         rewriter
             .create<IREE::LinalgExt::WinogradFilterTransformOp>(
                 loc, kernelInit.getType(), ValueRange{kernel},
-                ValueRange{kernelInit}, outputTileSize, kernelSize, kernelDims)
+                ValueRange{kernelInit}, outputTileSize, kernelSize, kernelDims,
+                inputTileDimsKernel)
             .getResults()[0];
 
     // Add collapse shape
     SmallVector<int64_t> collapsedFilterShape;
-    collapsedFilterShape.push_back(filterResultShape[0] * filterResultShape[1]);
-    collapsedFilterShape.push_back(filterResultShape[2]);
-    collapsedFilterShape.push_back(filterResultShape[3]);
-    SmallVector<ReassociationIndices> filterReassociations = {{0, 1}, {2}, {3}};
+    collapsedFilterShape.push_back(filterResultShape[0]);
+    collapsedFilterShape.push_back(filterResultShape[1]);
+    collapsedFilterShape.push_back(filterResultShape[2] * filterResultShape[3]);
+    SmallVector<ReassociationIndices> filterReassociations = {{0}, {1}, {2, 3}};
     Value collapsedWinogradFilter =
         createCollapse(winogradFilter, loc, rewriter, collapsedFilterShape,
                        filterReassociations);
@@ -237,19 +254,17 @@ public:
       permute<IREE::LinalgExt::Permutation::NCHW_TO_NHWC>(inputShape);
     }
 
+    const std::array<int64_t, 2> inputTileDimsImage = {4, 5};
     const std::array<int64_t, 2> nhwcImageDims = {1, 2};
     const std::array<int64_t, 2> nchwImageDims = {2, 3};
-    const size_t numImageDims = nhwcImageDims.size();
     SmallVector<int64_t> resultShape(6, inputTileSize);
     llvm::SmallSetVector<int64_t, 2> imageDimsSet(nhwcImageDims.begin(),
                                                   nhwcImageDims.end());
-    int outputIndex;
     for (int i = 0; i < inputShape.size(); i++) {
-      outputIndex = i + numImageDims;
       if (!imageDimsSet.contains(i)) {
-        resultShape[outputIndex] = inputShape[i];
+        resultShape[i] = inputShape[i];
       } else {
-        resultShape[outputIndex] =
+        resultShape[i] =
             std::ceil((float)(inputShape[i] - kernelSize + 1) / outputTileSize);
       }
     }
@@ -261,24 +276,37 @@ public:
         rewriter
             .create<IREE::LinalgExt::WinogradInputTransformOp>(
                 loc, inputTfInit.getType(), ValueRange{input},
-                ValueRange{inputTfInit}, outputTileSize, kernelSize, imageDims)
+                ValueRange{inputTfInit}, outputTileSize, kernelSize, imageDims,
+                inputTileDimsImage)
             .getResults()[0];
 
     // Add collapse shape
     SmallVector<int64_t> collapsedShape = {
-        resultShape[0] * resultShape[1],
-        resultShape[2] * resultShape[3] * resultShape[4], resultShape[5]};
-    SmallVector<ReassociationIndices> reassociations = {{0, 1}, {2, 3, 4}, {5}};
+        resultShape[0] * resultShape[1] * resultShape[2], resultShape[3],
+        resultShape[4] * resultShape[5]};
+    SmallVector<ReassociationIndices> reassociations = {{0, 1, 2}, {3}, {4, 5}};
     Value collapsedWinogradInput = createCollapse(
         winogradInput, loc, rewriter, collapsedShape, reassociations);
 
-    // Add BatchMatmulOp
-    SmallVector<int64_t> bmmShape(collapsedShape.begin(), collapsedShape.end());
+    // Add batch matmul (generalized because batch dimension is innermost).
+    MLIRContext *context = rewriter.getContext();
+    AffineExpr bDim, mDim, nDim, kDim;
+    bindDims(context, bDim, mDim, nDim, kDim);
+    auto lhsMap = AffineMap::get(4, 0, {mDim, kDim, bDim}, context);
+    auto rhsMap = AffineMap::get(4, 0, {kDim, nDim, bDim}, context);
+    auto resultMap = AffineMap::get(4, 0, {mDim, nDim, bDim}, context);
+    auto parallel = utils::IteratorType::parallel;
+    auto reduction = utils::IteratorType::reduction;
+    SmallVector<utils::IteratorType> genericIterators = {parallel, parallel,
+                                                         parallel, reduction};
+    SmallVector<int64_t> bmmShape = {
+        resultShape[0] * resultShape[1] * resultShape[2], resultShape[3],
+        resultShape[4] * resultShape[5]};
     SmallVector<int64_t> outputShape(outputType.getShape());
     if (isNchwFchw) {
       permute<IREE::LinalgExt::Permutation::NCHW_TO_NHWC>(outputShape);
     }
-    bmmShape[2] = outputShape[3];
+    bmmShape[1] = outputShape[3];
     auto bmmOutputType = RankedTensorType::get(bmmShape, outElemType);
     Value bmmInit =
         rewriter.create<tensor::EmptyOp>(loc, bmmShape, outElemType);
@@ -286,17 +314,31 @@ public:
         loc, rewriter.getZeroAttr(outElemType));
     auto fillOp = rewriter.create<linalg::FillOp>(loc, ValueRange{zero},
                                                   ValueRange{bmmInit});
-    auto bmmOp = rewriter.create<linalg::BatchMatmulOp>(
+    auto genericOp = rewriter.create<linalg::GenericOp>(
         loc, bmmOutputType,
-        ValueRange({collapsedWinogradInput, collapsedWinogradFilter}),
-        ValueRange({fillOp.result()}));
-    Value bmmResult = bmmOp.getResult(0);
+        /*inputs=*/ValueRange{collapsedWinogradInput, collapsedWinogradFilter},
+        /*outputs=*/ValueRange{fillOp.result()},
+        ArrayRef<AffineMap>{lhsMap, rhsMap, resultMap}, genericIterators,
+        [&](OpBuilder &nestedBuilder, Location nestedLoc, ValueRange args) {
+          Value lhsPromoted =
+              convertScalarToDtype(nestedBuilder, loc, args[0],
+                                   args[2].getType(), /*isUnsignedCast=*/false);
+          Value rhsPromoted =
+              convertScalarToDtype(nestedBuilder, loc, args[1],
+                                   args[2].getType(), /*isUnsignedCast=*/false);
+          Value mul = nestedBuilder.create<arith::MulFOp>(
+              nestedLoc, lhsPromoted, rhsPromoted);
+          Value add =
+              nestedBuilder.create<arith::AddFOp>(nestedLoc, mul, args[2]);
+          nestedBuilder.create<linalg::YieldOp>(nestedLoc, add);
+        });
+    Value bmmResult = genericOp.getResults().front();
 
     // Add expand shape
     SmallVector<int64_t> expandedShape = {resultShape[0], resultShape[1],
-                                          resultShape[2], resultShape[3],
-                                          resultShape[4], outputShape[3]};
-    reassociations = {{0, 1}, {2, 3, 4}, {5}};
+                                          resultShape[2], outputShape[3],
+                                          resultShape[4], resultShape[5]};
+    reassociations = {{0, 1, 2}, {3}, {4, 5}};
     Value expandedBmmResult =
         createExpand(bmmResult, loc, rewriter, expandedShape, reassociations);
 
@@ -306,7 +348,7 @@ public:
       if (!imageDimsSet.contains(i)) {
         paddedResultShape[i] = outputShape[i];
       } else {
-        paddedResultShape[i] = resultShape[i + numImageDims] * outputTileSize;
+        paddedResultShape[i] = resultShape[i] * outputTileSize;
       }
     }
     if (isNchwFchw) {
@@ -318,7 +360,8 @@ public:
         rewriter
             .create<IREE::LinalgExt::WinogradOutputTransformOp>(
                 loc, outputTfInit.getType(), ValueRange{expandedBmmResult},
-                ValueRange{outputTfInit}, outputTileSize, kernelSize, imageDims)
+                ValueRange{outputTfInit}, outputTileSize, kernelSize, imageDims,
+                inputTileDimsImage)
             .getResults()[0];
 
     // Extract slice
@@ -327,7 +370,7 @@ public:
     SmallVector<OpFoldResult> strides(outputShape.size(),
                                       rewriter.getIndexAttr(1));
     SmallVector<OpFoldResult> sizes =
-        getAsIndexOpFoldResult(rewriter.getContext(), outputType.getShape());
+        getAsIndexOpFoldResult(context, outputType.getShape());
     auto winogradOutput = rewriter.create<tensor::ExtractSliceOp>(
         loc, outputType, paddedOutput, offsets, sizes, strides);
 
