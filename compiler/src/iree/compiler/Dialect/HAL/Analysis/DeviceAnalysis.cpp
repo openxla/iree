@@ -208,7 +208,7 @@ void DeviceAnalysis::gatherRequiredExecutableTargets(
     Operation *forOp, SetVector<IREE::HAL::ExecutableTargetAttr> &resultSet) {
   // Get the affinity from the op or an ancestor. Note that there may be no
   // affinity specified at all.
-  auto affinityAttr = IREE::Stream::AffinityAttr::lookup(forOp);
+  auto affinityAttr = IREE::Stream::AffinityAttr::lookupOrDefault(forOp);
 
   // Gather the device targets that are referenced by the affinity.
   SetVector<IREE::HAL::DeviceTargetAttr> deviceTargetSet;
@@ -218,6 +218,16 @@ void DeviceAnalysis::gatherRequiredExecutableTargets(
   for (auto deviceTargetAttr : deviceTargetSet) {
     resultSet.insert(deviceTargetAttr.getExecutableTargets().begin(),
                      deviceTargetAttr.getExecutableTargets().end());
+  }
+}
+
+void DeviceAnalysis::gatherRequiredExecutableTargets(
+    IREE::Stream::AffinityAttr affinityAttr, Operation *fromOp,
+    SetVector<IREE::HAL::ExecutableTargetAttr> &resultSet) {
+  SetVector<IREE::HAL::DeviceTargetAttr> deviceTargetAttrs;
+  gatherDeviceAffinityTargets(affinityAttr, fromOp, deviceTargetAttrs);
+  for (auto deviceTargetAttr : deviceTargetAttrs) {
+    deviceTargetAttr.getExecutableTargets(resultSet);
   }
 }
 

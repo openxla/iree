@@ -44,19 +44,12 @@ struct Global {
 
   bool isCandidate() { return !isIndirect && op.isGlobalPrivate(); }
 
-  // TODO(benvanik): refine how we determine whether we can DCE things. Today we
-  // can be too aggressive with certain types that may be side-effecting though
-  // that shouldn't be the case: the IREE execution model should not require
-  // globals to be stored to be correct as anything using a reference type
-  // should be capturing it. Unfortunately today our DCE is not comprehensive
-  // enough to be safe.
-  //
   // Returns true if the global can be DCEd if there are no loads.
   // This is generally only the case for value types as reference types may be
   // aliased or have side effects on creation.
   bool canDCE() {
     return isCandidate() &&
-           !isa<IREE::Util::ReferenceTypeInterface>(op.getGlobalType());
+           cast<SymbolOpInterface>(op.getOperation()).canDiscardOnUseEmpty();
   }
 };
 
@@ -358,12 +351,13 @@ static bool inlineConstantGlobalLoads(GlobalTable &globalTable) {
 // are discarded.
 static bool eraseUnusedGlobals(GlobalTable &globalTable) {
   return globalTable.forEach([&](Global &global) {
-    if (!global.canDCE())
-      return GlobalAction::PRESERVE;
-    if (global.loadOps.empty()) {
-      // No loads; remove entirely.
-      return GlobalAction::DELETE;
-    }
+    // DO NOT SUBMIT hal.device.resolve doesn't trigger this load
+    // if (!global.canDCE()) {
+    //   return GlobalAction::PRESERVE;
+    // } else if (global.loadOps.empty()) {
+    //   // No loads; remove entirely.
+    //   return GlobalAction::DELETE;
+    // }
     return GlobalAction::PRESERVE;
   });
 }
