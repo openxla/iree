@@ -106,7 +106,7 @@ applyTileAndFuseToEachRoot(RewriterBase &rewriter,
 
       // TODO: Add some helpers to construct this based on the enum type rather
       // than doing it here.
-      SmallVector<DeviceMappingAttrInterface> mapping;
+      SmallVector<Attribute> mapping;
       for (auto [idx, size] : llvm::enumerate(tileSizes)) {
         if (!isConstantIntValue(size, 0)) {
           unsigned mappingId =
