@@ -25,8 +25,9 @@ module attributes { transform.with_named_sequence } {
 // CHECK-DAG:   #[[MAP1:.+]] = affine_map<()[s0] -> (s0 ceildiv 30)>
 // CHECK-DAG:   #[[MAP2:.+]] = affine_map<(d0) -> (d0 * 10)>
 // CHECK-DAG:   #[[MAP3:.+]] = affine_map<(d0)[s0] -> (d0 * -10 + s0, 10)>
-// CHECK-DAG:   #[[MAP4:.+]] = affine_map<(d0) -> (d0 * 30)>
-// CHECK-DAG:   #[[MAP5:.+]] = affine_map<(d0)[s0] -> (d0 * -30 + s0, 30)>
+// CHECK-DAG:   #[[MAP4:.+]] = affine_map<(d0) -> (0, d0)>
+// CHECK-DAG:   #[[MAP5:.+]] = affine_map<(d0) -> (d0 * 30)>
+// CHECK-DAG:   #[[MAP6:.+]] = affine_map<(d0)[s0] -> (d0 * -30 + s0, 30)>
 // CHECK:       func.func @scatter_tiling_distribution(
 // CHECK-SAME:      %[[ORIGINAL:[a-zA-Z0-9_]+]]
 // CHECK-SAME:      %[[INDICES:[a-zA-Z0-9_]+]]
@@ -39,9 +40,11 @@ module attributes { transform.with_named_sequence } {
 // CHECK-DAG:     %[[UB1:.+]] = affine.apply #[[MAP1]]()[%[[D1]]]
 // CHECK:         %[[RESULT:.+]] = scf.forall (%[[IV0:.+]], %[[IV1:.+]]) in (%[[UB0]], %[[UB1]]) shared_outs(%[[ITER:.+]] = %[[ORIGINAL]])
 // CHECK-DAG:       %[[I:.+]] = affine.apply #[[MAP2]](%[[IV0]])
-// CHECK-DAG:       %[[I_SZ:.+]] = affine.min #[[MAP3]](%[[IV0]])[%[[D0]]]
-// CHECK-DAG:       %[[J:.+]] = affine.apply #[[MAP4]](%[[IV1]])
-// CHECK-DAG:       %[[J_SZ:.+]] = affine.min #[[MAP5]](%[[IV1]])[%[[D1]]]
+// CHECK-DAG:       %[[I_SZ_MIN:.+]] = affine.min #[[MAP3]](%[[IV0]])[%[[D0]]]
+// CHECK-DAG:       %[[I_SZ:.+]] = affine.max #[[MAP4]](%[[I_SZ_MIN]])
+// CHECK-DAG:       %[[J:.+]] = affine.apply #[[MAP5]](%[[IV1]])
+// CHECK-DAG:       %[[J_SZ_MIN:.+]] = affine.min #[[MAP6]](%[[IV1]])[%[[D1]]]
+// CHECK-DAG:       %[[J_SZ:.+]] = affine.max #[[MAP4]](%[[J_SZ_MIN]])
 // CHECK:           %[[UPDATES_TILE:.+]] = tensor.extract_slice %[[UPDATES]]
 // CHECK-SAME:        [%[[I]], %[[J]]] [%[[I_SZ]], %[[J_SZ]]] [1, 1]
 // CHECK:           %[[INDICES_TILE:.+]] = tensor.extract_slice %[[INDICES]]
@@ -87,8 +90,9 @@ module attributes { transform.with_named_sequence } {
 // CHECK-DAG:   #[[MAP1:.+]] = affine_map<()[s0] -> (s0 ceildiv 30)>
 // CHECK-DAG:   #[[MAP2:.+]] = affine_map<(d0) -> (d0 * 10)>
 // CHECK-DAG:   #[[MAP3:.+]] = affine_map<(d0)[s0] -> (d0 * -10 + s0, 10)>
-// CHECK-DAG:   #[[MAP4:.+]] = affine_map<(d0) -> (d0 * 30)>
-// CHECK-DAG:   #[[MAP5:.+]] = affine_map<(d0)[s0] -> (d0 * -30 + s0, 30)>
+// CHECK-DAG:   #[[MAP4:.+]] = affine_map<(d0) -> (0, d0)>
+// CHECK-DAG:   #[[MAP5:.+]] = affine_map<(d0) -> (d0 * 30)>
+// CHECK-DAG:   #[[MAP6:.+]] = affine_map<(d0)[s0] -> (d0 * -30 + s0, 30)>
 // CHECK:       func.func @sort_3d_multi_result_distribute(
 // CHECK-SAME:      %[[SRC0:[a-zA-Z0-9_]+]]
 // CHECK-SAME:      %[[SRC1:[a-zA-Z0-9_]+]]
@@ -102,9 +106,11 @@ module attributes { transform.with_named_sequence } {
 // CHECK-DAG:     %[[UB1:.+]] = affine.apply #[[MAP1]]()[%[[D1]]]
 // CHECK:         %[[RESULT:.+]]:2 = scf.forall (%[[IV0:.+]], %[[IV1:.+]]) in (%[[UB0]], %[[UB1]]) shared_outs(%[[ITER0:.+]] = %[[SRC0]], %[[ITER1:.+]] = %[[SRC1]])
 // CHECK-DAG:       %[[I:.+]] = affine.apply #[[MAP2]](%[[IV0]])
-// CHECK-DAG:       %[[I_SZ:.+]] = affine.min #[[MAP3]](%[[IV0]])[%[[D0]]]
-// CHECK-DAG:       %[[J:.+]] = affine.apply #[[MAP4]](%[[IV1]])
-// CHECK-DAG:       %[[J_SZ:.+]] = affine.min #[[MAP5]](%[[IV1]])[%[[D1]]]
+// CHECK-DAG:       %[[I_SZ_MIN:.+]] = affine.min #[[MAP3]](%[[IV0]])[%[[D0]]]
+// CHECK-DAG:       %[[I_SZ:.+]] = affine.max #[[MAP4]](%[[I_SZ_MIN]])
+// CHECK-DAG:       %[[J:.+]] = affine.apply #[[MAP5]](%[[IV1]])
+// CHECK-DAG:       %[[J_SZ_MIN:.+]] = affine.min #[[MAP6]](%[[IV1]])[%[[D1]]]
+// CHECK-DAG:       %[[J_SZ:.+]] = affine.max #[[MAP4]](%[[J_SZ_MIN]])
 // CHECK:           %[[ITER0_TILE:.+]] = tensor.extract_slice %[[ITER0]]
 // CHECK-SAME:        [%[[I]], %[[J]], 0] [%[[I_SZ]], %[[J_SZ]], %[[D2]]]
 // CHECK:           %[[ITER1_TILE:.+]] = tensor.extract_slice %[[ITER1]]
@@ -145,8 +151,9 @@ module attributes { transform.with_named_sequence } {
 // CHECK-DAG:   #[[MAP1:.+]] = affine_map<()[s0] -> (s0 ceildiv 30)>
 // CHECK-DAG:   #[[MAP2:.+]] = affine_map<(d0) -> (d0 * 10)>
 // CHECK-DAG:   #[[MAP3:.+]] = affine_map<(d0)[s0] -> (d0 * -10 + s0, 10)>
-// CHECK-DAG:   #[[MAP4:.+]] = affine_map<(d0) -> (d0 * 30)>
-// CHECK-DAG:   #[[MAP5:.+]] = affine_map<(d0)[s0] -> (d0 * -30 + s0, 30)>
+// CHECK-DAG:   #[[MAP4:.+]] = affine_map<(d0) -> (0, d0)>
+// CHECK-DAG:   #[[MAP5:.+]] = affine_map<(d0) -> (d0 * 30)>
+// CHECK-DAG:   #[[MAP6:.+]] = affine_map<(d0)[s0] -> (d0 * -30 + s0, 30)>
 // CHECK:       func.func @sort_3d_multi_result_distribute_memref(
 // CHECK-SAME:      %[[SRC0:[a-zA-Z0-9_]+]]
 // CHECK-SAME:      %[[SRC1:[a-zA-Z0-9_]+]]
@@ -160,9 +167,11 @@ module attributes { transform.with_named_sequence } {
 // CHECK-DAG:     %[[UB1:.+]] = affine.apply #[[MAP1]]()[%[[D1]]]
 // CHECK:         scf.forall (%[[IV0:.+]], %[[IV1:.+]]) in (%[[UB0]], %[[UB1]])
 // CHECK-DAG:       %[[I:.+]] = affine.apply #[[MAP2]](%[[IV0]])
-// CHECK-DAG:       %[[I_SZ:.+]] = affine.min #[[MAP3]](%[[IV0]])[%[[D0]]]
-// CHECK-DAG:       %[[J:.+]] = affine.apply #[[MAP4]](%[[IV1]])
-// CHECK-DAG:       %[[J_SZ:.+]] = affine.min #[[MAP5]](%[[IV1]])[%[[D1]]]
+// CHECK-DAG:       %[[I_SZ_MIN:.+]] = affine.min #[[MAP3]](%[[IV0]])[%[[D0]]]
+// CHECK-DAG:       %[[I_SZ:.+]] = affine.max #[[MAP4]](%[[I_SZ_MIN]])
+// CHECK-DAG:       %[[J:.+]] = affine.apply #[[MAP5]](%[[IV1]])
+// CHECK-DAG:       %[[J_SZ_MIN:.+]] = affine.min #[[MAP6]](%[[IV1]])[%[[D1]]]
+// CHECK-DAG:       %[[J_SZ:.+]] = affine.max #[[MAP4]](%[[J_SZ_MIN]])
 // CHECK:           %[[SRC0_TILE:.+]] = memref.subview %[[SRC0]]
 // CHECK-SAME:        [%[[I]], %[[J]], 0] [%[[I_SZ]], %[[J_SZ]], %[[D2]]]
 // CHECK:           %[[SRC1_TILE:.+]] = memref.subview %[[SRC1]]
