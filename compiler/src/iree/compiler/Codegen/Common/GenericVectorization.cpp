@@ -365,6 +365,16 @@ void GenericVectorizationPass::runOnOperation() {
   };
 
   {
+    RewritePatternSet transferSliceFoldingPatterns(funcOp.getContext());
+    tensor::populateFoldTensorSubsetIntoVectorTransferPatterns(
+        transferSliceFoldingPatterns);
+    if (failed(applyPatternsAndFoldGreedily(funcOp,
+            std::move(transferSliceFoldingPatterns)))) {
+      return signalPassFailure();
+    }
+  }
+
+  {
     // Canonicalize mask related ops before we lower them.
     RewritePatternSet maskCanonPatterns(funcOp.getContext());
     vector::CreateMaskOp::getCanonicalizationPatterns(maskCanonPatterns,
