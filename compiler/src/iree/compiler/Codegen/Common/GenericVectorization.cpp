@@ -365,18 +365,15 @@ void GenericVectorizationPass::runOnOperation() {
   };
 
   {
-    RewritePatternSet transferSliceFoldingPatterns(funcOp.getContext());
-    tensor::populateFoldTensorSubsetIntoVectorTransferPatterns(
-        transferSliceFoldingPatterns);
-    if (failed(applyPatternsAndFoldGreedily(funcOp,
-            std::move(transferSliceFoldingPatterns)))) {
-      return signalPassFailure();
-    }
-  }
-
-  {
-    // Canonicalize mask related ops before we lower them.
+    // Canonicalize mask related ops before we lower them. Also run patterns
+    // for vector transfers on tensor subset ops, since they can be folded if
+    // not handled here.
     RewritePatternSet maskCanonPatterns(funcOp.getContext());
+    // It is important to add these vector transfer on tensor subset patterns
+    // in the first greedy pattern rewrite, since transfer foldings can remove
+    // vectorized reads and writes by folding them into tensor ops.
+    tensor::populateFoldTensorSubsetIntoVectorTransferPatterns(
+        maskCanonPatterns);
     vector::CreateMaskOp::getCanonicalizationPatterns(maskCanonPatterns,
                                                       funcOp.getContext());
     vector::ConstantMaskOp::getCanonicalizationPatterns(maskCanonPatterns,
