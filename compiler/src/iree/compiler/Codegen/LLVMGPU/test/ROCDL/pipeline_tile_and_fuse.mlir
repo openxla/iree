@@ -115,14 +115,14 @@ hal.executable public @main {
 //       CHECK:     gpu.barrier
 //       CHECK:     %[[LHS_MM:.+]] = vector.transfer_read {{.*}} vector<2x1x2x4xf16>
 //       CHECK:     gpu.barrier
-//       CHECK:     %[[LHS_T:.+]] = vector.transpose %[[LHS_MM]], [0, 2, 1, 3] : vector<2x1x2x4xf16>
+//       CHECK:     vector.transpose %[[LHS_MM]], [0, 2, 1, 3] : vector<2x1x2x4xf16>
 //       CHECK:     %[[RHS_RD:.+]] = vector.transfer_read %[[B1]]{{.*}} vector<8xf16>
 //       CHECK:     vector.transfer_write %[[RHS_RD]]
 //       CHECK:     gpu.barrier
 //       CHECK:     %[[RHS_MM:.+]] = vector.transfer_read {{.*}} vector<2x1x2x4xf16>
 //       CHECK:     gpu.barrier
-//       CHECK:     %[[RHS_T:.+]] = vector.transpose %[[RHS_MM]], [0, 2, 1, 3] : vector<2x1x2x4xf16>
-//       CHECK:     %[[MM:.+]] = iree_gpu.multi_mma %[[LHS_T]], %[[RHS_T]]
-//       CHECK:     scf.yield %[[MM]]
+//       CHECK:     vector.transpose %[[RHS_MM]], [0, 2, 1, 3] : vector<2x1x2x4xf16>
+// CHECK-COUNT-4:   amdgpu.mfma {{.*}}blocks = 1 : i32, k = 16 : i32, m = 16 : i32, n = 16 : i32
+//       CHECK:     scf.yield
 //       CHECK:   %[[LOOP_T:.+]] = vector.transpose %[[LOOP]], [0, 2, 1, 3] : vector<2x2x4x1xf32> to vector<2x4x2x1xf32>
 //       CHECK:   vector.transfer_write %[[LOOP_T]], %[[B2]]
