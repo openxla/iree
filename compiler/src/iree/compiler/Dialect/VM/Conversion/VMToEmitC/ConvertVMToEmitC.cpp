@@ -3208,7 +3208,6 @@ class ReturnOpConversion : public EmitCConversionPattern<IREE::VM::ReturnOp> {
   LogicalResult
   matchAndRewrite(IREE::VM::ReturnOp op, Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto ctx = op.getContext();
     auto loc = op.getLoc();
 
     auto funcOp = op.getOperation()->getParentOfType<mlir::emitc::FuncOp>();
@@ -3228,7 +3227,7 @@ class ReturnOpConversion : public EmitCConversionPattern<IREE::VM::ReturnOp> {
       if (llvm::isa<IREE::VM::RefType>(operand.getType())) {
         assert(operand.getType() !=
                emitc::PointerType::get(
-                   emitc::OpaqueType::get(ctx, "iree_vm_ref_t")));
+                   emitc::OpaqueType::get(op.getContext(), "iree_vm_ref_t")));
 
         Value operandRef = getModuleAnalysis().lookupRef(operand);
 
