@@ -16,6 +16,7 @@ on:
       - exppkg-*
       # Short term feature branches:
       - sdxl
+      - mahesh/tiling_interface
 
 concurrency:
   # A PR number if a pull request and otherwise the commit hash. This cancels
