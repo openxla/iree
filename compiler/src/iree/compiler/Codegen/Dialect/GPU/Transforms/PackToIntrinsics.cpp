@@ -76,7 +76,6 @@ LogicalResult packToIntrinsic(linalg::LinalgOp linalgOp,
 
 void PackToIntrinsicsPass::runOnOperation() {
   MLIRContext *context = &getContext();
-  RewritePatternSet patterns(context);
   auto funcOp = getOperation();
   IRRewriter rewriter(funcOp);
   SmallVector<linalg::LinalgOp> packingCandidates;
@@ -90,6 +89,18 @@ void PackToIntrinsicsPass::runOnOperation() {
       funcOp.emitError() << "failed to pack operation marked with intrinsic\n";
       return signalPassFailure();
     }
+  }
+
+  // Run layout propagation patterns to pull in adjacent un-configured ops.
+  RewritePatternSet patterns(context);
+  linalg::ControlPropagationFn control = [](Operation *op) -> bool {
+    return !getLoweringConfig(op);
+  };
+
+  linalg::populateDataLayoutPropagationPatterns(patterns, control);
+  if (failed(
+          applyPatternsAndFoldGreedily(getOperation(), std::move(patterns)))) {
+    return signalPassFailure();
   }
 }
 

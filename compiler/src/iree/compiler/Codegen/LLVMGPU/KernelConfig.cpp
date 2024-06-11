@@ -1897,7 +1897,15 @@ LogicalResult initGPULaunchConfig(FunctionOpInterface funcOp) {
   if (failed(setRootConfig(target, funcOp, rootOperation)))
     return funcOp.emitOpError("failed to set root config");
 
-  propagateLoweringConfig(rootOperation, computeOps);
+  IREE::Codegen::TranslationInfoAttr translationInfo =
+      getTranslationInfo(funcOp);
+  if (!translationInfo) {
+    return failure();
+  }
+  if (translationInfo.getDispatchLoweringPassPipeline() !=
+      IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse) {
+    propagateLoweringConfig(rootOperation, computeOps);
+  }
   return success();
 }
 
