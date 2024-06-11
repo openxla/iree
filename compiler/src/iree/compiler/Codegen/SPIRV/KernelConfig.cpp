@@ -1313,8 +1313,8 @@ static LogicalResult setDefaultOpConfig(spirv::ResourceLimitsAttr limits,
     // single thread to run everything.
     auto pipeline = CodeGenPipeline::SPIRVBaseDistribute;
     std::array<int64_t, 3> workgroupSize = {1, 1, 1};
-    return setOpConfigAndEntryPointFnTranslation(funcOp, op, {}, pipeline,
-                                                 workgroupSize);
+    return setOpConfigAndEntryPointFnTranslation(
+        funcOp, op, TileSizesListType{}, pipeline, workgroupSize);
   }
 
   const int subgroupSize = limits.getSubgroupSize();

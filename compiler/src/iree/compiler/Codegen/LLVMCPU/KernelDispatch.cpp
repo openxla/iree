@@ -1887,7 +1887,7 @@ setDefaultGenericOpRootConfig(mlir::FunctionOpInterface entryPointFn,
   unsigned numLoops = genericOp.getNumLoops();
   if (numLoops == 0) {
     return setOpConfigAndEntryPointFnTranslation(
-        entryPointFn, genericOp, {{}},
+        entryPointFn, genericOp, TileSizesListType{{}},
         DispatchLoweringPassPipeline::CPUDefault);
   }
 
