@@ -7,11 +7,17 @@
 #ifndef IREE_COMPILER_CODEGEN_DIALECT_GPU_TARGETUTILS_CONFIGUTILS_H_
 #define IREE_COMPILER_CODEGEN_DIALECT_GPU_TARGETUTILS_CONFIGUTILS_H_
 
+#include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 
 namespace mlir::iree_compiler::IREE::GPU {
 
-SmallVector<int64_t> deriveThreadTileSizes(Operation *op);
+/// Helper for setting up a default tile and fuse config for targeting
+/// simple thread distribution. Currently restricted to linalg ops.
+LogicalResult setTileAndFuseLoweringConfig(IREE::GPU::TargetAttr target,
+                                           mlir::FunctionOpInterface entryPoint,
+                                           Operation *op);
 
 } // namespace mlir::iree_compiler::IREE::GPU
 

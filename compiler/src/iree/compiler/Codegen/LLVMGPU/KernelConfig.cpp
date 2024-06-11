@@ -13,6 +13,7 @@
 #include "iree/compiler/Codegen/Common/GPU/GPUHeuristics.h"
 #include "iree/compiler/Codegen/Dialect/Codegen/IR/IREECodegenAttrs.h"
 #include "iree/compiler/Codegen/Dialect/GPU/IR/IREEGPUAttrs.h"
+#include "iree/compiler/Codegen/Dialect/GPU/TargetUtils/ConfigUtils.h"
 #include "iree/compiler/Codegen/Interfaces/PartitionableLoopsInterface.h"
 #include "iree/compiler/Codegen/Interfaces/UKernelOpInterface.h"
 #include "iree/compiler/Codegen/LLVMGPU/Passes.h"
@@ -41,6 +42,11 @@
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X << "\n")
 namespace mlir::iree_compiler {
+
+llvm::cl::opt<bool> clGPUEnableTileAndFuse(
+    "iree-codegen-llvmgpu-use-tile-and-fuse",
+    llvm::cl::desc("enable the usage of the tile and fuse pipeline"),
+    llvm::cl::init(false));
 
 llvm::cl::opt<bool> clGPUEnableVectorDistribution(
     "iree-codegen-llvmgpu-use-vector-distribution",
@@ -1757,6 +1763,14 @@ static LogicalResult setRootConfig(IREE::GPU::TargetAttr target,
     LDBG("Transform Dialect Config");
     return success();
   }
+  if (clGPUEnableTileAndFuse) {
+    LDBG("Tile and fuse config");
+    // TODO: Add configurations for matmul here too.
+    if (succeeded(IREE::GPU::setTileAndFuseLoweringConfig(target, entryPointFn,
+                                                          computeOp))) {
+      return success();
+    }
+  }
   if (succeeded(setVectorDistributionConfig(target, entryPointFn, computeOp))) {
     return success();
   }
@@ -1863,14 +1877,20 @@ LogicalResult initGPULaunchConfig(FunctionOpInterface funcOp) {
   }
 
   SmallVector<Operation *> computeOps = getComputeOps(funcOp);
-  if (getTranslationInfo(funcOp)) {
-    // Currently LLVMGPU requires propagation of user lowering configs.
-    for (auto op : computeOps) {
-      if (getLoweringConfig(op)) {
-        propagateLoweringConfig(op, computeOps);
-        break;
+  if (IREE::Codegen::TranslationInfoAttr translationInfo =
+          getTranslationInfo(funcOp)) {
+    // Currently ROCDL requires propagation of user lowering configs for
+    // all pipelines except TileAndFuse.
+    if (translationInfo.getDispatchLoweringPassPipeline() !=
+        IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse) {
+      for (auto op : computeOps) {
+        if (getLoweringConfig(op)) {
+          propagateLoweringConfig(op, computeOps);
+          break;
+        }
       }
     }
+    // Translation info (lowering pipeline) is already set.
     return success();
   }
 
@@ -1914,7 +1934,10 @@ LogicalResult initGPULaunchConfig(FunctionOpInterface funcOp) {
   if (failed(setRootConfig(target, funcOp, rootOperation)))
     return funcOp.emitOpError("failed to set root config");
 
-  propagateLoweringConfig(rootOperation, computeOps);
+  if (getTranslationInfo(funcOp).getDispatchLoweringPassPipeline() !=
+      IREE::Codegen::DispatchLoweringPassPipeline::LLVMGPUTileAndFuse) {
+    propagateLoweringConfig(rootOperation, computeOps);
+  }
   return success();
 }
 
