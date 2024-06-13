@@ -328,7 +328,7 @@ collectChannelInnerDimsIndices(AffineMap map,
 // using the same transposing/packing logic.
 static LogicalResult
 transposeConvLikeLinalgOp(PatternRewriter &rewriter, linalg::LinalgOp convOp,
-                          int tilingFactor,
+                          int tilingFactor, bool enableFHWCFilter = false,
                           ConvBuilderFn convBuilder = defaultConvBuilderFn) {
   Location loc = convOp.getLoc();
 
@@ -372,12 +372,38 @@ transposeConvLikeLinalgOp(PatternRewriter &rewriter, linalg::LinalgOp convOp,
   SmallVector<int64_t> outputIndices =
       collectChannelInnerDimsIndices(outputMap, convDims.outputChannel);
 
+  bool inputIndicesInnerMost =
+      isInnerIdentityIndices(inputIndices, inputMap.getNumResults());
+  bool filterIndicesInnerMost =
+      isInnerIdentityIndices(filterIndices, filterMap.getNumResults());
+  bool outputIndicesInnerMost =
+      isInnerIdentityIndices(filterIndices, filterMap.getNumResults());
+
   // If the dimensions to transpose/pack are already in the correct order and
   // inner most, nothing to do.
-  if (isInnerIdentityIndices(inputIndices, inputMap.getNumResults()) &&
-      isInnerIdentityIndices(filterIndices, filterMap.getNumResults()) &&
-      isInnerIdentityIndices(outputIndices, outputMap.getNumResults())) {
+  if (inputIndicesInnerMost && filterIndicesInnerMost &&
+      outputIndicesInnerMost) {
     return failure();
+  }
+
+  // Default Option: FCHW => HWCF, requires both input and output channel
+  // indices (C and F) as the innermost dimensions for filter tensor transpose.
+  // enableFHWCFilter Option: FCHW => FWHC, requires only input channel indices
+  // (F) as the innermost dimensions for filter tensor transpose.
+  if (enableFHWCFilter) {
+    filterIndices =
+        collectChannelInnerDimsIndices(filterMap, convDims.inputChannel);
+    // If the dimensions are in the correct order based on the updated filter
+    // indices.
+    filterIndicesInnerMost =
+        isInnerIdentityIndices(filterIndices, filterMap.getNumResults());
+
+    // If the tensor dimensions are already in the correct FHWC order, no
+    // further action is required.
+    if (isInnerIdentityIndices(inputIndices, inputMap.getNumResults()) &&
+        isInnerIdentityIndices(filterIndices, filterMap.getNumResults()) &&
+        isInnerIdentityIndices(outputIndices, outputMap.getNumResults()))
+      return failure();
   }
 
   int nDims = outputMap.getNumDims();
@@ -450,15 +476,31 @@ namespace {
 
 struct ConvertLinalgConvNchwFchw : OpRewritePattern<linalg::Conv2DNchwFchwOp> {
   using OpRewritePattern::OpRewritePattern;
-  ConvertLinalgConvNchwFchw(MLIRContext *context, PatternBenefit benefit = 2)
-      : OpRewritePattern<linalg::Conv2DNchwFchwOp>(context, benefit) {}
+  ConvertLinalgConvNchwFchw(MLIRContext *context, bool enableFHWC = false,
+                            PatternBenefit benefit = 2)
+      : OpRewritePattern<linalg::Conv2DNchwFchwOp>(context, benefit),
+        enableFHWCFilter(enableFHWC) {}
 
   LogicalResult matchAndRewrite(linalg::Conv2DNchwFchwOp convOp,
                                 PatternRewriter &rewriter) const override {
+    DenseIntElementsAttr strides = convOp.getStrides();
+    bool hasAllOneStrides =
+        strides.isSplat() && strides.getSplatValue<int64_t>() == 1;
+    // Only enable this new filter layout when all strides are 1.
+    if (enableFHWCFilter && hasAllOneStrides) {
+      return transposeConvLikeLinalgOp(
+          rewriter, convOp, /*tilingFactor=*/-1, enableFHWCFilter,
+          namedConvBuilderFn<linalg::Conv2DNchwFchwOp,
+                             linalg::Conv2DNhwcFhwcOp>);
+    }
+
     return transposeConvLikeLinalgOp(
-        rewriter, convOp, /*tilingFactor=*/-1,
+        rewriter, convOp, /*tilingFactor=*/-1, false,
         namedConvBuilderFn<linalg::Conv2DNchwFchwOp, linalg::Conv2DNhwcHwcfOp>);
   }
+
+private:
+  bool enableFHWCFilter;
 };
 
 // Default convolution-like transposing pattern for any linalg op to a generic.
@@ -466,18 +508,20 @@ struct ConvertLinalgConvNchwFchw : OpRewritePattern<linalg::Conv2DNchwFchwOp> {
 
 struct ConvertLinalgConvOp : OpInterfaceRewritePattern<linalg::LinalgOp> {
   using OpInterfaceRewritePattern<linalg::LinalgOp>::OpInterfaceRewritePattern;
-  ConvertLinalgConvOp(MLIRContext *context, int tile,
+  ConvertLinalgConvOp(MLIRContext *context, int tile, bool enableFHWC,
                       PatternBenefit benefit = 1)
       : OpInterfaceRewritePattern<linalg::LinalgOp>(context, benefit),
-        tilingFactor(tile) {}
+        tilingFactor(tile), enableFHWCFilter(enableFHWC) {}
 
   LogicalResult matchAndRewrite(linalg::LinalgOp op,
                                 PatternRewriter &rewriter) const override {
-    return transposeConvLikeLinalgOp(rewriter, op, tilingFactor);
+    return transposeConvLikeLinalgOp(rewriter, op, tilingFactor,
+                                     enableFHWCFilter);
   }
 
 private:
   int tilingFactor;
+  bool enableFHWCFilter;
 };
 
 //=====================================================================
@@ -662,9 +706,10 @@ public:
     {
       RewritePatternSet patterns(context);
       if (tilingFactor <= 0) {
-        patterns.insert<ConvertLinalgConvNchwFchw>(context);
+        patterns.insert<ConvertLinalgConvNchwFchw>(context, enableFHWCFilter);
       }
-      patterns.insert<ConvertLinalgConvOp>(context, tilingFactor);
+      patterns.insert<ConvertLinalgConvOp>(context, tilingFactor,
+                                           enableFHWCFilter);
       if (failed(applyPatternsAndFoldGreedily(op, std::move(patterns)))) {
         return signalPassFailure();
       }
