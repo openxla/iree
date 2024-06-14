@@ -19,7 +19,7 @@ on:
       bump_target:
         description: 'Commit hash or branch to bump the submodule to'
         required: false
-        default: 'origin/main'
+        default: 'upstream/main'
   pull_request:
     branches:
       - main
@@ -34,6 +34,7 @@ jobs:
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c  # v3.3.0
         with:
           submodules: false
+          ref: main
 
       - name: Setting git config
         run: |
@@ -48,12 +49,13 @@ jobs:
         id: bump_submodule
         run: |
           cd third_party/torch-mlir
-          git fetch origin
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            git checkout ${{ github.event.inputs.bump_target }}
+          git checkout main
+          if [ "workflow_dispatch" == "workflow_dispatch" ]; then
+            bump_target=${{ github.event.inputs.bump_target }}
           else
-            git checkout origin/main
+            bump_target=upstream/main
           fi
+          git pull ${bump_target//\// }
           TORCH_MLIR_COMMIT=$(git rev-parse HEAD)
           cd ../..
           git add third_party/torch-mlir
