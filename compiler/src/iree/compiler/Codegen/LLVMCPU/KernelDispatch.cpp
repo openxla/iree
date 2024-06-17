@@ -890,7 +890,7 @@ getDefaultDistributedLevelTileSizes(Operation *op,
 /// Splits the tile sizes in `parallelSizes` into `reductionSizes` for the
 /// reduction loops.
 static void splitParallelAndReductionTiles(
-    linalg::LinalgOp op, SmallVectorImpl<int64_t> &parallelSizes,
+    Operation *op, SmallVectorImpl<int64_t> &parallelSizes,
     SmallVectorImpl<int64_t> &reductionSizes,
     SmallVectorImpl<bool> *parallelScalableFlags = nullptr,
     SmallVectorImpl<bool> *reductionScalableFlags = nullptr) {
@@ -900,8 +900,9 @@ static void splitParallelAndReductionTiles(
     reductionScalableFlags->assign(parallelScalableFlags->begin(),
                                    parallelScalableFlags->end());
   }
+  TilingInterface tilingOp = cast<TilingInterface>(op);
   for (auto [index, iteratorType] :
-       llvm::enumerate(op.getIteratorTypesArray())) {
+       llvm::enumerate(tilingOp.getLoopIteratorTypes())) {
     if (iteratorType == utils::IteratorType::parallel) {
       reductionSizes[index] = 0;
       if (reductionScalableFlags)
@@ -1121,9 +1122,9 @@ setMatmulRootConfig(mlir::FunctionOpInterface entryPointFn,
   SmallVector<int64_t> parallelTileSizes = vecTileSizes;
   SmallVector<int64_t> reductionTileSizes;
   SmallVector<bool> reductionScalableFlags;
-  splitParallelAndReductionTiles(
-      cast<linalg::LinalgOp>(op.getOperation()), parallelTileSizes,
-      reductionTileSizes, &parallelScalableFlags, &reductionScalableFlags);
+  splitParallelAndReductionTiles(op, parallelTileSizes, reductionTileSizes,
+                                 &parallelScalableFlags,
+                                 &reductionScalableFlags);
 
   if (vecPreProcStrategy == VectorPreProcStrategy::None) {
     setVectorSizesForDynamicShapes(cast<linalg::LinalgOp>(op.getOperation()),
@@ -1751,17 +1752,17 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
 
   // Batch, M and N (parallel dimensions) are distributed on workgroups.
   DistributionHeuristicConfig config;
-  SmallVector<int64_t> distTileSizes = getDefaultDistributedLevelTileSizes(
-      attnOp, DistributionHeuristicConfig{});
+  SmallVector<int64_t> distTileSizes =
+      getDefaultDistributedLevelTileSizes(attnOp, config);
 
   // Batch, M and N (parallel dimensions) are distributed on workgroups.
   SmallVector<int64_t> vecTileSizes(attnOp.getIterationDomainRank(), 1);
-  // Mark reduction dimensions not to distribute.
-  for (int64_t i :
-       llvm::concat<const int64_t>(opInfo.getK1Dims(), opInfo.getK2Dims())) {
+  // Mark k1 reduction dimensions not to distribute.
+  for (int i : opInfo.getK1Dims()) {
     vecTileSizes[i] = 0;
   }
-  int64_t vectorSize = getVectorSize(entryPointFn, attnOp.getOutputType());
+  int64_t vectorSize =
+      getVectorSize(entryPointFn, attnOp.getOutput().getType());
   for (auto i : llvm::seq<unsigned>(0, vecTileSizes.size())) {
     // Do not tile reduction dimensions.
     if (vecTileSizes[i] == 0) {
@@ -1773,18 +1774,17 @@ static LogicalResult setRootConfig(mlir::FunctionOpInterface entryPointFn,
         /*numElem=*/tileSize, vectorSize, vectorSize);
   }
 
-  // TODO (17467): Due to a bug in TileAndDecomposeAttention, N dimension
-  // cannot be tiled. Remove this once fixed.
-  for (int64_t i : opInfo.getNDims()) {
-    distTileSizes[i] = 0;
-    vecTileSizes[i] = 0;
-  }
+  SmallVector<int64_t> parallelTileSizes = vecTileSizes;
+  SmallVector<int64_t> reductionTileSizes;
+  splitParallelAndReductionTiles(attnOp, parallelTileSizes, reductionTileSizes);
 
-  TileSizesListType tileSizes = {distTileSizes, vecTileSizes};
+  LLVM_DEBUG(KD_DBGS() << "Vectorization/unrolling tile sizes (parallel): "
+                       << parallelTileSizes << "\n");
+  LLVM_DEBUG(KD_DBGS() << "Vectorization/unrolling tile sizes (reduction): "
+                       << reductionTileSizes << "\n");
 
-  // TODO: (Groverkss): Tile K2 here using reduction tiling interface once we
-  // have it. TileAndDecomposeAttention pass only tiles K2. I think it should
-  // be possible to tile K1 also, but need to explore it more.
+  TileSizesListType tileSizes = {distTileSizes, parallelTileSizes,
+                                 reductionTileSizes};
 
   return setOpConfigAndEntryPointFnTranslation(
       entryPointFn, attnOp, tileSizes,
