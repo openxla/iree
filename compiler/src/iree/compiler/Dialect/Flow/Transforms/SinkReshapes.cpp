@@ -45,10 +45,36 @@ public:
 /// fusion analysis actually happens, but that requires a direct producer ->
 /// consumer relationship and indexing maps for the right analysis. Here
 /// we just approximate it (and try to be optimistic)
-static bool isFusableUsingTileAndFuse(Operation *producer,
-                                      Operation *consumer) {
-  return llvm::isa_and_nonnull<linalg::LinalgOp, tensor::UnPackOp,
-                               Encoding::UnsetEncodingOp>(producer);
+static bool isFusableUsingTileAndFuse(Operation *producer, Operation *consumer,
+                                      unsigned consumerOperandNumber) {
+  if (llvm::isa_and_nonnull<tensor::UnPackOp, Encoding::UnsetEncodingOp>(
+          producer)) {
+    return true;
+  }
+
+  // If the producer is a linalg op.
+  auto producerLinalgOp = dyn_cast_or_null<linalg::LinalgOp>(producer);
+  if (!producerLinalgOp) {
+    return false;
+  }
+  // Ignore elementwise linalg op producers.
+  if (producerLinalgOp.getNumLoops() ==
+      producerLinalgOp.getNumParallelLoops()) {
+    return false;
+  }
+
+  // For now just check that the consumer iteration space rank is same as the
+  // producers parallel iteration space rank. This is done by checking that the
+  // consumer has a permutation index for the corresponding operand.
+  auto consumerLinalgOp = dyn_cast<linalg::LinalgOp>(consumer);
+  if (!consumerLinalgOp) {
+    return false;
+  }
+  AffineMap indexingMap =
+      cast<AffineMapAttr>(
+          consumerLinalgOp.getIndexingMaps()[consumerOperandNumber])
+          .getValue();
+  return indexingMap.isPermutation();
 }
 
 /// Control function to check if an `tensor.expand_shape` (which is producer of
@@ -65,7 +91,7 @@ static bool shouldSinkExpandShapeOp(OpOperand *opOperand) {
     return false;
   }
 
-  // Do not sink reshapes across dequantize operations since they are
+  // Do not sink reshapes across dequantize operations since tey are
   // cloned into their producers.
   if (isDequantizationLikeOp(consumer)) {
     return false;
@@ -76,7 +102,8 @@ static bool shouldSinkExpandShapeOp(OpOperand *opOperand) {
   if (llvm::any_of(consumer->getOpOperands(), [](OpOperand &opOperand) {
         Operation *currProducer = opOperand.get().getDefiningOp();
         Operation *currConsumer = opOperand.getOwner();
-        return isFusableUsingTileAndFuse(currProducer, currConsumer) &&
+        return isFusableUsingTileAndFuse(currProducer, currConsumer,
+                                         opOperand.getOperandNumber()) &&
                // The check for the producer having a single use is not fully
                // worked out. Ideally we can fuse with a producer irrespective
                // of number of uses, but is a good thumb rule in practice.
@@ -91,8 +118,8 @@ static bool shouldSinkExpandShapeOp(OpOperand *opOperand) {
       return false;
   }
 
-  return isFusableUsingTileAndFuse(reshapeOp.getSrc().getDefiningOp(),
-                                   consumer);
+  return isFusableUsingTileAndFuse(reshapeOp.getSrc().getDefiningOp(), consumer,
+                                   opOperand->getOperandNumber());
 }
 
 void SinkReshapesPass::runOnOperation() {
