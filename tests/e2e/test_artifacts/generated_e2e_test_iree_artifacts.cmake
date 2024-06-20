@@ -1736,7 +1736,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=adreno-unknown-android31"
+    "--iree-vulkan-target=adreno"
   FRIENDLY_NAME "MobileBertSquad_fp32(tflite) [qualcomm-adreno-vulkan_android31-vulkan_spirv][default-flags]"
   PUBLIC
 )
@@ -1748,7 +1748,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=adreno-unknown-android31"
+    "--iree-vulkan-target=adreno"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
   FRIENDLY_NAME "MobileBertSquad_fp32(tflite) [qualcomm-adreno-vulkan_android31-vulkan_spirv][experimental-flags,fuse-padding]"
   PUBLIC
@@ -1761,7 +1761,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
   FRIENDLY_NAME "MobileBertSquad_fp32(tflite) [arm-valhall-vulkan_android31-vulkan_spirv][default-flags]"
   PUBLIC
 )
@@ -1773,7 +1773,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-input-demote-f32-to-f16"
   FRIENDLY_NAME "MobileBertSquad_fp16(tflite) [arm-valhall-vulkan_android31-vulkan_spirv][default-flags,demote-f32-to-f16]"
   PUBLIC
@@ -1786,7 +1786,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
   FRIENDLY_NAME "MobileBertSquad_int8(tflite) [arm-valhall-vulkan_android31-vulkan_spirv][default-flags]"
   PUBLIC
 )
@@ -1798,7 +1798,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
   FRIENDLY_NAME "MobileBertSquad_fp32(tflite) [arm-valhall-vulkan_android31-vulkan_spirv][experimental-flags,fuse-padding,max-concurrency]"
@@ -1812,7 +1812,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-input-demote-f32-to-f16"
@@ -1827,7 +1827,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
   FRIENDLY_NAME "MobileBertSquad_int8(tflite) [arm-valhall-vulkan_android31-vulkan_spirv][experimental-flags,fuse-padding,max-concurrency]"
@@ -1841,7 +1841,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-hal-benchmark-dispatch-repeat-count=32"
@@ -1856,7 +1856,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-hal-benchmark-dispatch-repeat-count=32"
@@ -1872,7 +1872,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-hal-benchmark-dispatch-repeat-count=32"
@@ -4014,7 +4014,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=adreno-unknown-android31"
+    "--iree-vulkan-target=adreno"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -4030,7 +4030,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=adreno-unknown-android31"
+    "--iree-vulkan-target=adreno"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -4047,7 +4047,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -4063,7 +4063,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-input-demote-f32-to-f16"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -4080,7 +4080,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -4096,7 +4096,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-vm-emit-polyglot-zip=true"
@@ -4114,7 +4114,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-input-demote-f32-to-f16"
@@ -4133,7 +4133,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-vm-emit-polyglot-zip=true"
@@ -4151,7 +4151,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-hal-benchmark-dispatch-repeat-count=32"
@@ -4170,7 +4170,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-hal-benchmark-dispatch-repeat-count=32"
@@ -4190,7 +4190,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=vulkan-spirv"
     "--iree-input-type=tosa"
-    "--iree-vulkan-target-triple=valhall-unknown-android31"
+    "--iree-vulkan-target=valhall"
     "--iree-flow-enable-fuse-padding-into-linalg-consumer-ops"
     "--iree-stream-partitioning-favor=max-concurrency"
     "--iree-hal-benchmark-dispatch-repeat-count=32"

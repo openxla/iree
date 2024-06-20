@@ -152,7 +152,7 @@ for i in $(ls ${ROOT_DIR}/models/tflite/); do
     "${IREE_COMPILE_PATH}" \
       --iree-input-type=tosa \
       --iree-hal-target-backends=vulkan-spirv \
-      --iree-vulkan-target-triple=valhall-unknown-android31 \
+      --iree-vulkan-target=valhall
       --iree-llvmcpu-debug-symbols=false \
       --iree-vm-bytecode-module-strip-source-map=true \
       --iree-vm-emit-polyglot-zip=false \
@@ -163,7 +163,7 @@ for i in $(ls ${ROOT_DIR}/models/tflite/); do
     "${IREE_COMPILE_PATH}" \
       --iree-input-type=tosa \
       --iree-hal-target-backends=vulkan-spirv \
-      --iree-vulkan-target-triple=valhall-unknown-android31 \
+      --iree-vulkan-target=valhall
       --iree-llvmcpu-debug-symbols=false \
       --iree-vm-bytecode-module-strip-source-map=true \
       --iree-vm-emit-polyglot-zip=false \
@@ -175,7 +175,7 @@ for i in $(ls ${ROOT_DIR}/models/tflite/); do
     "${IREE_COMPILE_PATH}" \
       --iree-input-type=tosa \
       --iree-hal-target-backends=vulkan-spirv \
-      --iree-vulkan-target-triple=valhall-unknown-android31 \
+      --iree-vulkan-target=valhall
       --iree-input-demote-f32-to-f16 \
       --iree-llvmcpu-debug-symbols=false \
       --iree-vm-bytecode-module-strip-source-map=true \
@@ -188,7 +188,7 @@ for i in $(ls ${ROOT_DIR}/models/tflite/); do
     "${IREE_COMPILE_PATH}" \
       --iree-input-type=tosa \
       --iree-hal-target-backends=vulkan-spirv \
-      --iree-vulkan-target-triple=adreno-unknown-android31 \
+      --iree-vulkan-target=adreno
       --iree-llvmcpu-debug-symbols=false \
       --iree-vm-bytecode-module-strip-source-map=true \
       --iree-vm-emit-polyglot-zip=false \
