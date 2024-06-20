@@ -1054,7 +1054,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
   FRIENDLY_NAME "EfficientNetV2STF(stablehlo) [cuda-sm_80-linux_gnu-cuda][default-flags]"
   PUBLIC
 )
@@ -1066,7 +1066,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
   FRIENDLY_NAME "MiniLML12H384Uncased(stablehlo) [cuda-sm_80-linux_gnu-cuda][default-flags]"
   PUBLIC
 )
@@ -1078,7 +1078,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
   FRIENDLY_NAME "BertForMaskedLMTF(stablehlo) [cuda-sm_80-linux_gnu-cuda][default-flags]"
   PUBLIC
 )
@@ -1090,7 +1090,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
   FRIENDLY_NAME "BertLargeTF(stablehlo) [cuda-sm_80-linux_gnu-cuda][default-flags]"
   PUBLIC
 )
@@ -1102,7 +1102,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_3456x1024x2048_f16t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1115,7 +1115,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_3456x1024x2048_f32t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1128,7 +1128,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_2560x2560x2560_f16t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1141,7 +1141,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_2560x2560x2560_f32t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1154,7 +1154,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_2564x2564x2564_f32t_f32t_f32t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1167,7 +1167,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_2562x2564x2562_f32t_f32t_f32t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1180,7 +1180,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_2562x2561x2561_f32t_f32t_f32t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1193,7 +1193,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
   FRIENDLY_NAME "matmul_123x2561x2561_f32t_f32t_f32t_tile_config_default(linalg) [cuda-sm_80-linux_gnu-cuda][ukernel,matmul]"
   PUBLIC
@@ -1206,7 +1206,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-flow-split-matmul-reduction=4"
     "--iree-codegen-llvmgpu-use-wmma"
@@ -1221,7 +1221,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-flow-split-matmul-reduction=4"
     "--iree-codegen-llvmgpu-use-wmma"
@@ -3144,7 +3144,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -3160,7 +3160,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -3176,7 +3176,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -3192,7 +3192,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=stablehlo"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
     "--iree-scheduling-dump-statistics-format=json"
@@ -3208,7 +3208,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3225,7 +3225,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3242,7 +3242,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3259,7 +3259,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3276,7 +3276,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3293,7 +3293,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3310,7 +3310,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3327,7 +3327,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-vm-emit-polyglot-zip=true"
     "--iree-llvmcpu-debug-symbols=false"
@@ -3344,7 +3344,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-flow-split-matmul-reduction=4"
     "--iree-codegen-llvmgpu-use-wmma"
@@ -3363,7 +3363,7 @@ iree_bytecode_module(
   FLAGS
     "--iree-hal-target-backends=cuda"
     "--iree-input-type=none"
-    "--iree-hal-cuda-llvm-target-arch=sm_80"
+    "--iree-cuda-target=sm_80"
     "--iree-hal-benchmark-dispatch-repeat-count=100"
     "--iree-flow-split-matmul-reduction=4"
     "--iree-codegen-llvmgpu-use-wmma"

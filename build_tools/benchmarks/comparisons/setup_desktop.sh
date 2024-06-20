@@ -84,7 +84,7 @@ for i in $(ls ${ROOT_DIR}/models/tflite/); do
   "${IREE_COMPILE_PATH}" \
     --iree-input-type=tosa \
     --iree-hal-target-backends=cuda \
-    --iree-hal-cuda-llvm-target-arch=sm_80 \
+    --iree-cuda-target=sm_80 \
     --iree-llvmcpu-debug-symbols=false \
     --iree-vm-bytecode-module-strip-source-map=true \
     --iree-vm-emit-polyglot-zip=false \
@@ -95,7 +95,7 @@ for i in $(ls ${ROOT_DIR}/models/tflite/); do
   "${IREE_COMPILE_PATH}" \
     --iree-input-type=tosa \
     --iree-hal-target-backends=cuda \
-    --iree-hal-cuda-llvm-target-arch=sm_80 \
+    --iree-cuda-target=sm_80 \
     --iree-input-demote-f32-to-f16 \
     --iree-llvmcpu-debug-symbols=false \
     --iree-vm-bytecode-module-strip-source-map=true \
