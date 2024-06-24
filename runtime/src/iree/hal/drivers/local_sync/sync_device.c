@@ -353,9 +353,11 @@ static iree_status_t iree_hal_sync_device_apply_deferred_command_buffers(
   // Stack allocate storage for an inline command buffer we'll use to replay
   // the deferred command buffers. We want to reset it between each apply so
   // that we don't get state carrying across.
+  iree_host_size_t storage_size = iree_hal_inline_command_buffer_size(
+      IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
+      /*binding_capacity=*/0);
   iree_byte_span_t storage =
-      iree_make_byte_span(iree_alloca(iree_hal_inline_command_buffer_size()),
-                          iree_hal_inline_command_buffer_size());
+      iree_make_byte_span(iree_alloca(storage_size), storage_size);
 
   // NOTE: we ignore any inline command buffers that may be passed in as they've
   // already executed during recording. The caller is probably in for a bad time
@@ -363,11 +365,14 @@ static iree_status_t iree_hal_sync_device_apply_deferred_command_buffers(
   for (iree_host_size_t i = 0; i < command_buffer_count; ++i) {
     iree_hal_command_buffer_t* command_buffer = command_buffers[i];
     if (iree_hal_deferred_command_buffer_isa(command_buffer)) {
+      // NOTE: we run unvalidated as inline command buffers don't support
+      // binding tables and can be validated entirely while recording.
       iree_hal_command_buffer_t* inline_command_buffer = NULL;
       IREE_RETURN_IF_ERROR(iree_hal_inline_command_buffer_initialize(
           (iree_hal_device_t*)device,
           iree_hal_command_buffer_mode(command_buffer) |
-              IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION,
+              IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION |
+              IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED,
           IREE_HAL_COMMAND_CATEGORY_ANY, IREE_HAL_QUEUE_AFFINITY_ANY,
           /*binding_capacity=*/0, device->host_allocator, storage,
           &inline_command_buffer));

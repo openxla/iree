@@ -206,45 +206,8 @@ typedef struct iree_hal_buffer_barrier_t {
   iree_hal_access_scope_t target_scope;
   // Buffer the barrier is restricted to.
   // The barrier will apply to the entire physical device allocation.
-  iree_hal_buffer_t* buffer;
-  // Relative offset/length within |buffer| (which may itself be mapped into the
-  // device allocation at an offset).
-  iree_device_size_t offset;
-  iree_device_size_t length;
+  iree_hal_buffer_ref_t buffer_ref;
 } iree_hal_buffer_barrier_t;
-
-// Specifies a descriptor set binding.
-// The range specified by [offset, length) will be made available to executables
-// on the given binding. If the descriptor type is dynamic then the range will
-// be [offset + dynamic_offset, length).
-//
-// The IREE HAL buffer type may internally be offset; such offset is applied
-// here as if it were the base address of the buffer. Note that the offset will
-// be applied at the time the binding is recording into the command buffer.
-//
-// Maps to VkDescriptorSetBinding.
-typedef struct iree_hal_descriptor_set_binding_t {
-  // The binding number of this entry and corresponds to a resource of the
-  // same binding number in the executable interface.
-  uint32_t binding : 8;
-  // Binding table slot the buffer will be sourced from if buffer is NULL.
-  // Only valid on command buffers that support indirect execution.
-  uint32_t buffer_slot : 24;
-  // Buffer bound to the binding number.
-  // If NULL then the buffer_slot will be used to resolve the buffer at command
-  // buffer execution time from the binding table.
-  iree_hal_buffer_t* buffer;
-  // Offset, in bytes, into the buffer that the binding starts at.
-  // When indirectly referencing a binding table buffer this will be added to
-  // the base offset of the bound buffer.
-  iree_device_size_t offset;
-  // Length, in bytes, of the buffer that is available to the executable.
-  // This can be IREE_WHOLE_BUFFER, however note that if the entire buffer
-  // contents are larger than supported by the device (~128MiB, usually) this
-  // will fail. If the descriptor type is dynamic this will be used for all
-  // ranges regardless of offset.
-  iree_device_size_t length;
-} iree_hal_descriptor_set_binding_t;
 
 // Specifies the type of collective operation.
 enum iree_hal_collective_kind_e {
@@ -453,18 +416,6 @@ iree_hal_command_buffer_mode_format(iree_hal_command_buffer_mode_t value,
 IREE_API_EXPORT iree_string_view_t iree_hal_command_category_format(
     iree_hal_command_category_t value, iree_bitfield_string_temp_t* out_temp);
 
-// Storage for command buffer validation state.
-// Designed to be embedded in concrete implementations that want validation.
-typedef struct iree_hal_command_buffer_validation_state_t {
-  iree_hal_device_t* device;
-  // 1 when in a begin/end recording sequence.
-  uint32_t is_recording : 1;
-  // Debug group depth for tracking proper begin/end pairing.
-  int32_t debug_group_depth;
-  // TODO(benvanik): current pipeline layout/descriptor set layout info.
-  // TODO(benvanik): valid push constant bit ranges.
-} iree_hal_command_buffer_validation_state_t;
-
 // Maximum size of any update in iree_hal_command_buffer_update_buffer.
 // 64KB is the limit on Vulkan and we uniformly use that today across all
 // targets as to not need too much command buffer memory.
@@ -499,6 +450,36 @@ static inline iree_hal_buffer_binding_table_t
 iree_hal_buffer_binding_table_empty(void) {
   iree_hal_buffer_binding_table_t table = {0, NULL};
   return table;
+}
+
+// DO NOT SUBMIT hide this?
+
+// Returns an unretained buffer from |binding_table| with the given |slot|.
+// If the caller needs to preserve the buffer for longer than the (known)
+// lifetime of the binding table then it must be retained or added to a resource
+// set.
+static inline iree_status_t iree_hal_buffer_binding_table_lookup(
+    iree_hal_buffer_binding_table_t binding_table, iree_host_size_t slot,
+    iree_hal_buffer_binding_t* out_binding) {
+  if (IREE_UNLIKELY(slot >= binding_table.count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "buffer binding %" PRIhsz
+        " out of range of binding table with capacity %" PRIhsz,
+        slot, binding_table.count);
+  }
+  *out_binding = binding_table.bindings[slot];
+  return iree_ok_status();
+}
+
+static inline iree_status_t iree_hal_buffer_binding_table_lookup_ref(
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_buffer_ref_t buffer_ref, iree_hal_buffer_binding_t* out_binding) {
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_binding_table_lookup(
+      binding_table, buffer_ref.buffer_slot, out_binding));
+  return iree_hal_buffer_calculate_range(
+      out_binding->offset, out_binding->length, buffer_ref.offset,
+      buffer_ref.length, &out_binding->offset, &out_binding->length);
 }
 
 //===----------------------------------------------------------------------===//
@@ -656,7 +637,8 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_wait_events(
 // This is because the discard may be used to elide write backs to host memory
 // or aggressively reuse the allocation for other purposes.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_discard_buffer(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_t* buffer);
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_ref_t buffer_ref);
 
 // Fills the target buffer with the given repeating value.
 // Expects that |pattern_length| is one of 1, 2, or 4 and that the offset and
@@ -664,8 +646,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_discard_buffer(
 // The target buffer must be compatible with the devices owned by this
 // device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t target_ref,
     const void* pattern, iree_host_size_t pattern_length);
 
 // Updates a range of the given target buffer from the source host memory.
@@ -679,8 +660,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_fill_buffer(
 // device queue and be allocated with IREE_HAL_BUFFER_USAGE_TRANSFER.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
     iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
-    iree_host_size_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length);
+    iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref);
 
 // Copies a range of one buffer to another.
 // Both buffers must be compatible with the devices owned by this device
@@ -691,18 +671,16 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_update_buffer(
 // This can be used to perform device->host, host->device, and device->device
 // copies.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length);
+    iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_ref_t source_ref,
+    iree_hal_buffer_ref_t target_ref);
 
 // Dispatches a collective operation defined by |op| using the given buffers.
 // |param| must be specified for operations that require a root/peer rank
 // identifier and is otherwise ignored.
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_collective(
     iree_hal_command_buffer_t* command_buffer, iree_hal_channel_t* channel,
-    iree_hal_collective_op_t op, uint32_t param,
-    iree_hal_buffer_binding_t send_binding,
-    iree_hal_buffer_binding_t recv_binding, iree_device_size_t element_count);
+    iree_hal_collective_op_t op, uint32_t param, iree_hal_buffer_ref_t send_ref,
+    iree_hal_buffer_ref_t recv_ref, iree_device_size_t element_count);
 
 // Pushes an inline set of constants that can be accessed by subsequent
 // dispatches using a compatible pipeline layout.
@@ -725,8 +703,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_push_constants(
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_push_descriptor_set(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_pipeline_layout_t* pipeline_layout, uint32_t set,
-    iree_host_size_t binding_count,
-    const iree_hal_descriptor_set_binding_t* bindings);
+    iree_host_size_t binding_count, const iree_hal_buffer_ref_t* bindings);
 
 // Dispatches an execution request.
 // The request may execute overlapped with any other transfer operation or
@@ -755,7 +732,7 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch(
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_dispatch_indirect(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_executable_t* executable, int32_t entry_point,
-    iree_hal_buffer_t* workgroups_buffer, iree_device_size_t workgroups_offset);
+    iree_hal_buffer_ref_t workgroups_ref);
 
 //===----------------------------------------------------------------------===//
 // Validation support
@@ -877,30 +854,27 @@ typedef struct iree_hal_command_buffer_vtable_t {
       const iree_hal_buffer_barrier_t* buffer_barriers);
 
   iree_status_t(IREE_API_PTR* discard_buffer)(
-      iree_hal_command_buffer_t* command_buffer, iree_hal_buffer_t* buffer);
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_buffer_ref_t buffer_ref);
 
   iree_status_t(IREE_API_PTR* fill_buffer)(
       iree_hal_command_buffer_t* command_buffer,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, const void* pattern,
+      iree_hal_buffer_ref_t target_ref, const void* pattern,
       iree_host_size_t pattern_length);
 
   iree_status_t(IREE_API_PTR* update_buffer)(
       iree_hal_command_buffer_t* command_buffer, const void* source_buffer,
-      iree_host_size_t source_offset, iree_hal_buffer_t* target_buffer,
-      iree_device_size_t target_offset, iree_device_size_t length);
+      iree_host_size_t source_offset, iree_hal_buffer_ref_t target_ref);
 
   iree_status_t(IREE_API_PTR* copy_buffer)(
       iree_hal_command_buffer_t* command_buffer,
-      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length);
+      iree_hal_buffer_ref_t source_ref, iree_hal_buffer_ref_t target_ref);
 
   iree_status_t(IREE_API_PTR* collective)(
       iree_hal_command_buffer_t* command_buffer, iree_hal_channel_t* channel,
       iree_hal_collective_op_t op, uint32_t param,
-      iree_hal_buffer_binding_t send_binding,
-      iree_hal_buffer_binding_t recv_binding, iree_device_size_t element_count);
+      iree_hal_buffer_ref_t send_ref, iree_hal_buffer_ref_t recv_ref,
+      iree_device_size_t element_count);
 
   iree_status_t(IREE_API_PTR* push_constants)(
       iree_hal_command_buffer_t* command_buffer,
@@ -910,8 +884,7 @@ typedef struct iree_hal_command_buffer_vtable_t {
   iree_status_t(IREE_API_PTR* push_descriptor_set)(
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_pipeline_layout_t* pipeline_layout, uint32_t set,
-      iree_host_size_t binding_count,
-      const iree_hal_descriptor_set_binding_t* bindings);
+      iree_host_size_t binding_count, const iree_hal_buffer_ref_t* bindings);
 
   iree_status_t(IREE_API_PTR* dispatch)(
       iree_hal_command_buffer_t* command_buffer,
@@ -921,8 +894,7 @@ typedef struct iree_hal_command_buffer_vtable_t {
   iree_status_t(IREE_API_PTR* dispatch_indirect)(
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_executable_t* executable, int32_t entry_point,
-      iree_hal_buffer_t* workgroups_buffer,
-      iree_device_size_t workgroups_offset);
+      iree_hal_buffer_ref_t workgroups_ref);
 } iree_hal_command_buffer_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_command_buffer_vtable_t);
 
@@ -932,17 +904,20 @@ struct iree_hal_command_buffer_t {
   iree_hal_command_category_t allowed_categories;
   iree_hal_queue_affinity_t queue_affinity;
   uint32_t binding_capacity;
-
-#if IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
-  iree_hal_command_buffer_validation_state_t validation;
-#endif  // IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
+  uint32_t binding_count;
+  void* validation_state;
 };
+
+// Returns the total size of the additional command buffer storage required for
+// validating the command buffer. Returns 0 if no validation state is required.
+IREE_API_EXPORT iree_host_size_t iree_hal_command_buffer_validation_state_size(
+    iree_hal_command_buffer_mode_t mode, iree_host_size_t binding_capacity);
 
 IREE_API_EXPORT void iree_hal_command_buffer_initialize(
     iree_hal_device_t* device, iree_hal_command_buffer_mode_t mode,
     iree_hal_command_category_t command_categories,
     iree_hal_queue_affinity_t queue_affinity, iree_host_size_t binding_capacity,
-    const iree_hal_command_buffer_vtable_t* vtable,
+    void* validation_state, const iree_hal_command_buffer_vtable_t* vtable,
     iree_hal_command_buffer_t* command_buffer);
 
 IREE_API_EXPORT void iree_hal_command_buffer_destroy(
