@@ -8,7 +8,6 @@
 #include "iree/compiler/Dialect/Flow/Transforms/FormDispatchRegions.h"
 #include "iree/compiler/Dialect/Flow/Transforms/Passes.h"
 #include "iree/compiler/Dialect/Flow/Transforms/RegionOpUtils.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -124,6 +123,8 @@ getCollapsibleLoops(linalg::GenericOp genericOp) {
   ReassociationIndices range;
   AffineExpr preExpr;
   // Find the largest sequence of dimensions that are
+  // - Not used to index operands with defining ops
+  // AND
   // - Either preserved in all maps, or
   // - are completely absent
   // This sequence can be collapsed. To find the sequence,
@@ -135,13 +136,10 @@ getCollapsibleLoops(linalg::GenericOp genericOp) {
   //    and repeat till the last element of sequence and the next result
   //    expression is not found as a sequence in all maps.
   for (auto nextExpr : genericOp.getIndexingMapsArray().front().getResults()) {
-    int64_t position = cast<AffineDimExpr>(nextExpr).getPosition();
-    if (preservedDims.contains(position)) {
-      preExpr = nextExpr;
-      continue;
-    }
+    unsigned position = cast<AffineDimExpr>(nextExpr).getPosition();
     if (!range.empty()) {
-      if (!hasAllMapsSameSequence(preExpr, nextExpr) ||
+      if (preservedDims.contains(position) ||
+          !hasAllMapsSameSequence(preExpr, nextExpr) ||
           !hasSameIteratorType(preExpr, nextExpr)) {
         if (range.size() > 1) {
           contiguousLoops.push_back({range.begin(), range.end()});
