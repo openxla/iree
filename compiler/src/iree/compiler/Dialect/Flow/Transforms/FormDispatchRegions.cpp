@@ -227,6 +227,14 @@ static bool isRootOp(Operation *op) {
   }
   // Dequantization-like ops get cloned into dispatches later.
   if (isDequantizationLikeOp(op)) {
+    // Disable dequant + conv fusion.
+    if (op->hasOneUse()) {
+      if (isa<linalg::Conv2DNchwFchwOp, linalg::Conv2DNhwcHwcfOp>(
+              *op->getUsers().begin())) {
+        return true;
+      }
+    }
+
     return false;
   }
   // Any Linalg named op or generic op with reduction iterator types is a root
