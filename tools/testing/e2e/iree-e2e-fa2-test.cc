@@ -37,8 +37,12 @@ static void reference_attention_f32_f32_f32_f32(
     const float* value_data, 
     float* result_data
 ) {
-    float scores[seqLen_size][seqLen_size];
-    float attention[seqLen_size][seqLen_size];
+    float** scores = (float**)malloc(seqLen_size * sizeof(float*));
+    float** attention = (float**)malloc(seqLen_size * sizeof(float*));
+    for (iree_hal_dim_t i = 0; i < seqLen_size; ++i) {
+        scores[i] = (float*)malloc(seqLen_size * sizeof(float));
+        attention[i] = (float*)malloc(seqLen_size * sizeof(float));
+    }
     
     // Calculate the scores
     for (int i = 0; i < seqLen_size; ++i) {
@@ -72,6 +76,14 @@ static void reference_attention_f32_f32_f32_f32(
             }
         }
     }
+
+    for (iree_hal_dim_t i = 0; i < seqLen_size; ++i) {
+        free(scores[i]);
+        free(attention[i]);
+    }
+    free(scores);
+    free(attention);
+
 }
 
 static iree_status_t reference_attention_element(
