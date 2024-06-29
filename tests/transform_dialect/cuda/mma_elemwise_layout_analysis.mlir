@@ -16,7 +16,7 @@ func.func @matmul(%lhs : tensor<16x16xf16>, %rhs : tensor<8x16xf16>, %bias : ten
 }
 
 // RUN: iree-compile %s --iree-hal-target-backends=cuda \
-// RUN:     --iree-hal-cuda-llvm-target-arch=sm_80 \
+// RUN:     --iree-cuda-target=sm_80 \
 // RUN:     --iree-codegen-llvmgpu-enable-transform-dialect-jit=false \
 // RUN:     --iree-codegen-transform-dialect-library=%p/mma_elemwise_layout_analysis_codegen_spec.mlir@__transform_main | \
 // RUN: iree-run-module --module=- --function=matmul --device=cuda \

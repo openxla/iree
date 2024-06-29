@@ -12,7 +12,7 @@ func.func @double_matmul(%lhs : tensor<16x16xf16>, %rhs : tensor<16x16xf16>, %se
 }
 
 // RUN: iree-compile %s --iree-hal-target-backends=cuda \
-// RUN:     --iree-hal-cuda-llvm-target-arch=sm_80 \
+// RUN:     --iree-cuda-target=sm_80 \
 // RUN:     --iree-codegen-llvmgpu-enable-transform-dialect-jit=false \
 // RUN:     --iree-flow-dispatch-use-transform-dialect=%p/double_mma_layout_analysis_dispatch_spec.mlir \
 // RUN:     --iree-codegen-transform-dialect-library=%p/double_mma_layout_analysis_codegen_spec.mlir@codegen | \
