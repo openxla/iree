@@ -725,7 +725,7 @@ public:
                 producer.getBlock()->without_terminator())) {
           return false;
         }
-        // We only handle arith.extf here for two reasons:
+        // We only handle arith.extf/extsi here for two reasons:
         //  1) This pattern is being applied to convolution/contraction
         //     interfaces. Extension semantics for integers depend on the named
         //     op and requires a slightly different pattern.
@@ -733,8 +733,9 @@ public:
         //     with consumers; it would be preferred to fuse those with
         //     producers (and the consumer fusion is arguably the less canonical
         //     form).
-        if (!llvm::isa<arith::ExtFOp>(
-                *producer.getBlock()->without_terminator().begin())) {
+        Operation *extOp =
+            &(*producer.getBlock()->without_terminator().begin());
+        if (!llvm::isa<arith::ExtFOp, arith::ExtSIOp>(extOp)) {
           return false;
         }
         Type producerElementType = getElementTypeOrSelf(
@@ -748,11 +749,10 @@ public:
         Value blockArg = block->insertArgument(
             operandNumber, producerElementType, namedOp.getLoc());
         // Create the extf.
-        auto ext = rewriter.create<arith::ExtFOp>(namedOp.getLoc(),
-                                                  outElementType, blockArg);
+        auto newExtOp = mlir::clone(rewriter, extOp, outElementType, blockArg);
         // Replace uses of the old argument with the extended value.
         rewriter.replaceAllUsesWith(block->getArgument(operandNumber + 1),
-                                    ext.getResult());
+                                    newExtOp->getResult(0));
         // Erase the old argument.
         block->eraseArgument(operandNumber + 1);
         return true;
