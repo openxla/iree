@@ -206,6 +206,7 @@ static void addDispatchRegionCreationPasses(OpPassManager &passManager) {
           })
       // Create dispatches for scalar operations as roots
       .addPass(IREE::Flow::createFormScalarDispatchesPass)
+      .addPass(IREE::Flow::createFoldUnitExtentDimsPass)
       // Create `flow.dispatch.region` centered around a root and fuse with
       // producers
       .addPass([&]() {
